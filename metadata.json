@@ -1,0 +1,8 @@
+{
+  "name": "Cổng Thi Thử & Đánh Giá Năng Lực",
+  "description": "Cổng tra cứu thông tin dự thi và làm bài thi thử các kỳ thi ĐGNL HSA, VACT, THPTQG",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
