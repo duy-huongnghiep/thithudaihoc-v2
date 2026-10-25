@@ -99,6 +99,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           'Bấm biểu tượng con mắt để kiểm tra lại mật khẩu đã gõ chính xác chưa.',
           'Bấm nút "Đăng Nhập" để truy cập vào Bảng điều khiển thí sinh cá nhân.',
           'Gợi ý: Nếu dùng nút "Đăng nhập ngay" ở Bước 2, bạn không cần phải gõ lại mật khẩu!',
+          'Hệ thống tự động đồng bộ hóa phiên làm việc và bảo mật thông tin dự thi của bạn.',
         ],
         actionLabel: 'Về Giao Diện Đăng Nhập',
         actionCallback: () => {
@@ -182,7 +183,8 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         description:
           'Giải quyết các tình huống thường gặp khi sử dụng cổng thông tin thi thử.',
         bulletPoints: [
-          'Vừa đăng ký form xong nhưng tra cứu chưa thấy? Nhấn biểu tượng icon xoay (Làm mới) ở góc trên bên phải màn hình để đồng bộ tức thì dữ liệu mới nhất từ Google Sheets.',
+          'Vừa đăng ký form xong? Hệ thống tự động đồng bộ tức thì, bạn có thể tra cứu hoặc đăng nhập ngay lập tức mà không cần phải tải lại trang web!',
+          'Bạn cũng có thể bấm biểu tượng xoay (Làm mới) ở góc trên bên phải bất cứ lúc nào để chủ động cập nhật dữ liệu mới nhất.',
           'Quên mật khẩu hoặc nhập sai SĐT? Liên hệ ngay Fanpage hoặc Hotline của Ban tổ chức để được hỗ trợ cấp lại.',
           'Thiết bị khuyến nghị: Máy tính để bàn, laptop hoặc máy tính bảng màn hình lớn để có trải nghiệm đọc đề tốt nhất.',
           'Đường truyền internet: Đảm bảo kết nối mạng ổn định trong suốt thời gian làm bài.',

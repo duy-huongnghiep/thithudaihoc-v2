@@ -20,8 +20,12 @@ import {
   Timer,
   AlertCircle,
   Calendar,
+  Settings,
+  Code2,
+  RefreshCw,
 } from 'lucide-react';
-import { isYes, getExamSchedule } from '../services/api';
+import { isYes, getExamSchedule, getScriptUrl, setScriptUrl, getStudentsData } from '../services/api';
+import { GOOGLE_APPS_SCRIPT_CODE } from '../services/loginLogger';
 import { EXAM_GROUPS, EXAM_TIPS } from '../data/examsData';
 import { ExamSection, StudentInfo } from '../types';
 import { ExamBadges } from './Badges';
@@ -51,6 +55,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   } | null>(null);
   const [copiedSbd, setCopiedSbd] = useState(false);
   const [, setTick] = useState(0);
+
+  // Admin panel states
+  const isAdmin = student.username === 'admin' || student.sbd === '0003';
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [adminScriptUrl, setAdminScriptUrl] = useState(() => getScriptUrl());
+  const [copiedScript, setCopiedScript] = useState(false);
+  const [urlSavedNotice, setUrlSavedNotice] = useState(false);
+  const [testSyncStatus, setTestSyncStatus] = useState<string | null>(null);
+  const [isTestingSync, setIsTestingSync] = useState(false);
 
   // Live timer interval to update countdown smoothly every second
   useEffect(() => {
@@ -602,6 +615,118 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           )}
         </div>
       </div>
+
+      {/* Admin Control Panel for Google Sheets integration & Apps Script code */}
+      {isAdmin && (
+        <div id="admin-google-sheet-panel" className="border border-indigo-500/40 rounded-2xl overflow-hidden bg-[#0c1024] p-3.5 space-y-3 shadow-md">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 font-bold text-xs text-indigo-300">
+              <Settings className="w-4 h-4 text-indigo-400" />
+              <span>Quản trị: Đồng bộ Google Sheets</span>
+            </span>
+            <button
+              type="button"
+              id="btn-toggle-admin-panel"
+              onClick={() => setShowAdminPanel(!showAdminPanel)}
+              className="text-xs text-indigo-400 hover:text-indigo-200 transition font-medium cursor-pointer"
+            >
+              {showAdminPanel ? 'Ẩn cài đặt' : 'Mở cài đặt'}
+            </button>
+          </div>
+
+          {showAdminPanel && (
+            <div className="space-y-3 pt-2 border-t border-slate-800 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                  URL Google Apps Script Web App:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="input-admin-script-url"
+                    value={adminScriptUrl}
+                    onChange={(e) => setAdminScriptUrl(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    className="flex-1 px-3 py-2 bg-[#080a14] border border-slate-700 rounded-xl text-slate-200 text-xs font-mono outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    id="btn-save-admin-script-url"
+                    onClick={() => {
+                      setScriptUrl(adminScriptUrl);
+                      setUrlSavedNotice(true);
+                      setTimeout(() => setUrlSavedNotice(false), 3000);
+                    }}
+                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                  >
+                    Lưu URL
+                  </button>
+                </div>
+                {urlSavedNotice && (
+                  <span className="text-[10px] text-emerald-400 mt-1 block">
+                    ✓ Đã lưu URL kết nối Google Apps Script thành công!
+                  </span>
+                )}
+              </div>
+
+              <div className="p-3 bg-[#080a14] border border-slate-800 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Mã Google Apps Script hoàn chỉnh:</span>
+                  </span>
+                  <button
+                    type="button"
+                    id="btn-copy-apps-script-code"
+                    onClick={() => {
+                      navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_CODE);
+                      setCopiedScript(true);
+                      setTimeout(() => setCopiedScript(false), 2500);
+                    }}
+                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 transition cursor-pointer"
+                  >
+                    {copiedScript ? <Check className="w-3 h-3 text-emerald-300" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedScript ? 'Đã sao chép!' : 'Sao chép mã'}</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Dán mã này vào <strong>Tiện ích mở rộng → Apps Script</strong> trong Google Trang tính &quot;Admin web thi&quot;.
+                  Sau đó bấm <strong>Triển khai → Quản lý bản triển khai → Chọn biểu tượng cây bút ✎ → Phiên bản: Phiên bản mới → Triển khai</strong>.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="button"
+                  id="btn-admin-test-sync"
+                  disabled={isTestingSync}
+                  onClick={async () => {
+                    setIsTestingSync(true);
+                    setTestSyncStatus(null);
+                    try {
+                      const data = await getStudentsData(true);
+                      setTestSyncStatus(`✓ Kết nối thành công! Đã tải ${data.length} thí sinh.`);
+                    } catch (e) {
+                      setTestSyncStatus(`✕ Lỗi: ${e instanceof Error ? e.message : 'Không kết nối được'}`);
+                    } finally {
+                      setIsTestingSync(false);
+                    }
+                  }}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingSync ? 'animate-spin' : ''}`} />
+                  <span>Kiểm tra kết nối</span>
+                </button>
+                {testSyncStatus && (
+                  <span className={`text-[11px] font-medium ${testSyncStatus.startsWith('✓') ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {testSyncStatus}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Logout Action */}
       <div className="pt-2">

@@ -212,7 +212,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({
           {isLoading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Đang kiểm tra thông tin...</span>
+              <span>Đang kiểm tra & đồng bộ dữ liệu...</span>
             </>
           ) : (
             <>

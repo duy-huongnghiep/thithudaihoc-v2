@@ -14,6 +14,7 @@ import { UserGuideModal } from './components/UserGuideModal';
 import { Footer } from './components/Footer';
 import { ActiveTab, StudentInfo } from './types';
 import { getStudentsData, prefetchData } from './services/api';
+import { recordLoginToSheet2 } from './services/loginLogger';
 import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 const SESSION_STUDENT_KEY = 'td_mock_exam_current_student';
@@ -99,6 +100,9 @@ export default function App() {
     setActiveTab('dashboard');
     setPreviousTab('dashboard');
     showToast(`Xin chào thí sinh ${student.hoten || student.username}!`, 'success');
+
+    // Automatically record student login into Trang tính 2 (Google Sheets)
+    recordLoginToSheet2(student).catch(() => {});
   };
 
   // Handle Quick Login from Search

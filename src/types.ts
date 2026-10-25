@@ -13,6 +13,21 @@ export interface StudentInfo {
   ketthuc?: string;
 }
 
+export interface LoginLogRecord {
+  id: string;
+  timestamp: string;
+  isoDate: string;
+  hoten: string;
+  sbd: string;
+  username: string;
+  email?: string;
+  namsinh?: string;
+  monthi: string;
+  device: string;
+  status: string;
+  synced: boolean;
+}
+
 export type ExamTimeStatus = 'FREE_TESTING' | 'OPEN' | 'UPCOMING' | 'CLOSED' | 'NO_SCHEDULE';
 
 export interface CountdownTime {

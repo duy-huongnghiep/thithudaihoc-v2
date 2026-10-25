@@ -28,19 +28,22 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       )}
 
-      {onRefreshData && (
-        <button
-          type="button"
-          id="btn-refresh-cache"
-          onClick={onRefreshData}
-          disabled={isRefreshing}
-          title="Làm mới dữ liệu từ Google Sheets"
-          className="absolute right-0 top-0 text-slate-500 hover:text-blue-400 transition p-1.5 rounded-lg hover:bg-slate-800/60 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
-          <span className="sr-only">Làm mới dữ liệu</span>
-        </button>
-      )}
+      <div className="absolute right-0 top-0 flex items-center gap-1">
+
+        {onRefreshData && (
+          <button
+            type="button"
+            id="btn-refresh-cache"
+            onClick={onRefreshData}
+            disabled={isRefreshing}
+            title="Làm mới dữ liệu từ Google Sheets"
+            className="text-slate-500 hover:text-blue-400 transition p-1.5 rounded-lg hover:bg-slate-800/60 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
+            <span className="sr-only">Làm mới dữ liệu</span>
+          </button>
+        )}
+      </div>
 
       {/* Monogram Logo */}
       <div
@@ -51,7 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="space-y-1">
         <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-wide uppercase flex items-center justify-center gap-2">
-          <span>THI THỬ CÁC KỲ THI</span>
+          <span>HỆ THỐNG THI THỬ VÀ HƯỚNG NGHIỆP</span>
         </h1>
         <p className="text-slate-400 text-xs flex items-center justify-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
