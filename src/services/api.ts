@@ -14,22 +14,24 @@ const CACHE_TTL_MS = 5 * 1000; // 5 seconds cache TTL for high freshness
  * Ensures instant login & tra cuu even if Google Apps Script is deploying or temporarily unavailable
  */
 const CACHE_VERSION_KEY = 'td_mock_exam_cache_ver';
-const CURRENT_CACHE_VERSION = 'v4_correct_name_mapping';
+const CURRENT_CACHE_VERSION = 'v5_admin_a2_a6_roles';
 
 export const DEFAULT_STUDENTS_SEED: StudentInfo[] = [
   {
-    username: '0367446745',
-    password: '0367446745',
-    sbd: '74629',
-    hoten: 'Nam',
-    email: 'avsdxgfnvgn',
-    namsinh: '2011',
-    hsa: 'Không',
+    username: 'amind',
+    password: 'ad12345@',
+    sbd: 'ad1',
+    hoten: 'admin Trường Duy',
+    email: 'admin',
+    namsinh: '',
+    hsa: '',
     vact: '',
     thptqg: '',
-    huongnghiep: 'Có',
-    batdau: '',
-    ketthuc: '',
+    huongnghiep: '',
+    batdau: '0',
+    ketthuc: '0',
+    rowNumber: 2,
+    isAdmin: true,
   },
   {
     username: '0333139562',
@@ -44,6 +46,8 @@ export const DEFAULT_STUDENTS_SEED: StudentInfo[] = [
     huongnghiep: 'Có',
     batdau: '',
     ketthuc: '',
+    rowNumber: 8,
+    isAdmin: false,
   },
   {
     username: '12345',
@@ -573,7 +577,20 @@ export function getExamSchedule(student?: StudentInfo | null): ExamScheduleInfo 
   };
 }
 
-export function parseStudentInfo(row: unknown): StudentInfo {
+export function isStudentAdmin(student: StudentInfo | null | undefined): boolean {
+  if (!student) return false;
+  if (student.isAdmin === true) return true;
+  if (student.rowNumber !== undefined && student.rowNumber >= 2 && student.rowNumber <= 6) return true;
+  const u = (student.username || '').toLowerCase().trim();
+  const e = (student.email || '').toLowerCase().trim();
+  const sbd = (student.sbd || '').toLowerCase().trim();
+  if (u === 'amind' || u === 'admin' || u.startsWith('admin') || (u.startsWith('ad') && u.length <= 8)) return true;
+  if (e === 'admin' || e.includes('admin')) return true;
+  if (sbd.startsWith('ad') || sbd === '0003' || sbd === '0007') return true;
+  return false;
+}
+
+export function parseStudentInfo(row: unknown, index?: number): StudentInfo {
   if (!row) {
     return {
       username: '',
@@ -591,6 +608,16 @@ export function parseStudentInfo(row: unknown): StudentInfo {
     };
   }
 
+  // Pre-calculate rowNumber from index or existing property
+  const rowNumber =
+    typeof (row as any)?.rowNumber === 'number'
+      ? (row as any).rowNumber
+      : index !== undefined
+      ? index + 2
+      : undefined;
+
+  const isRowAdmin = rowNumber !== undefined && rowNumber >= 2 && rowNumber <= 6;
+
   // If array format: [taikhoan, pass, sobaodanh, hoten, email, namsinh, hsa, vact, thptqg, huongnghiep, batdau, ketthuc]
   if (Array.isArray(row)) {
     const rawNamsinh = String(row[5] || '').trim();
@@ -600,12 +627,24 @@ export function parseStudentInfo(row: unknown): StudentInfo {
     const finalNamsinh = isShiftedYear ? rawHsa : rawNamsinh;
     const finalHsa = isShiftedYear ? String(row[7] || '').trim() : rawHsa;
 
+    const username = String(row[0] || '').trim();
+    const email = String(row[4] || '').trim();
+    const sbd = String(row[2] || '').trim();
+
+    const isAdmin =
+      isRowAdmin ||
+      username.toLowerCase() === 'amind' ||
+      username.toLowerCase() === 'admin' ||
+      username.toLowerCase().startsWith('admin') ||
+      email.toLowerCase() === 'admin' ||
+      sbd.toLowerCase().startsWith('ad');
+
     return {
-      username: String(row[0] || '').trim(),
+      username,
       password: String(row[1] || '').trim(),
-      sbd: String(row[2] || '').trim(),
+      sbd,
       hoten: String(row[3] || '').trim(),
-      email: String(row[4] || '').trim(),
+      email,
       namsinh: finalNamsinh,
       hsa: finalHsa,
       vact: String(row[isShiftedYear ? 8 : 7] || '').trim(),
@@ -613,6 +652,8 @@ export function parseStudentInfo(row: unknown): StudentInfo {
       huongnghiep: String(row[isShiftedYear ? 10 : 9] || '').trim(),
       batdau: String(row[isShiftedYear ? 11 : 10] || '').trim(),
       ketthuc: String(row[isShiftedYear ? 12 : 11] || '').trim(),
+      rowNumber,
+      isAdmin,
     };
   }
 
@@ -693,12 +734,24 @@ export function parseStudentInfo(row: unknown): StudentInfo {
     parsedNamsinh = parsedHsa;
   }
 
+  const parsedSbd = getFieldValue('sbd', ['sobaodanh', 'sbaodanh']);
+  const parsedEmail = getFieldValue('email', ['mail']);
+  const rawAdmin = (record as any)?.isAdmin;
+  const isAdmin =
+    isRowAdmin ||
+    rawAdmin === true ||
+    parsedUsername.toLowerCase() === 'amind' ||
+    parsedUsername.toLowerCase() === 'admin' ||
+    parsedUsername.toLowerCase().startsWith('admin') ||
+    parsedEmail.toLowerCase() === 'admin' ||
+    parsedSbd.toLowerCase().startsWith('ad');
+
   return {
     username: parsedUsername,
     password: getFieldValue('password', ['pass', 'matkhau', 'mk']),
-    sbd: getFieldValue('sbd', ['sobaodanh', 'sbaodanh']),
+    sbd: parsedSbd,
     hoten: parsedHoten,
-    email: getFieldValue('email', ['mail']),
+    email: parsedEmail,
     namsinh: parsedNamsinh,
     hsa: parsedHsa,
     vact: getFieldValue('vact', ['v_act']),
@@ -706,6 +759,8 @@ export function parseStudentInfo(row: unknown): StudentInfo {
     huongnghiep: getFieldValue('huongnghiep', ['career', 'nghiep']),
     batdau: getFieldValue('batdau', ['start', 'open', 'thoigianbatdau', 'tgstart']),
     ketthuc: getFieldValue('ketthuc', ['end', 'close', 'thoigianketthuc', 'han', 'tgend']),
+    rowNumber,
+    isAdmin,
   };
 }
 
@@ -754,7 +809,9 @@ async function fetchFromNetwork(forceRefresh = false): Promise<StudentInfo[]> {
     if (res.ok) {
       const rawData = await res.json();
       if (Array.isArray(rawData)) {
-        const parsed = rawData.map(parseStudentInfo).filter((s) => s.username || s.hoten || s.sbd);
+        const parsed = rawData
+          .map((item, idx) => parseStudentInfo(item, idx))
+          .filter((s) => s.username || s.hoten || s.sbd);
         if (parsed.length > 0) {
           return finalizeStudentList(parsed);
         }
@@ -795,7 +852,9 @@ async function fetchFromNetwork(forceRefresh = false): Promise<StudentInfo[]> {
       ) {
         const rawData = JSON.parse(text);
         if (Array.isArray(rawData)) {
-          const parsed = rawData.map(parseStudentInfo).filter((s) => s.username || s.hoten || s.sbd);
+          const parsed = rawData
+            .map((item, idx) => parseStudentInfo(item, idx))
+            .filter((s) => s.username || s.hoten || s.sbd);
           if (parsed.length > 0) {
             return finalizeStudentList(parsed);
           }

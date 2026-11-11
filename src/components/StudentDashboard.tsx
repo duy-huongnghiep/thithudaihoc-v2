@@ -24,20 +24,21 @@ import {
   Code2,
   RefreshCw,
 } from 'lucide-react';
-import { isYes, getExamSchedule, getScriptUrl, setScriptUrl, getStudentsData } from '../services/api';
+import { isYes, getExamSchedule, getScriptUrl, setScriptUrl, getStudentsData, isStudentAdmin } from '../services/api';
 import { GOOGLE_APPS_SCRIPT_CODE } from '../services/loginLogger';
 import { EXAM_GROUPS, EXAM_TIPS } from '../data/examsData';
 import { ExamSection, StudentInfo } from '../types';
 import { ExamBadges } from './Badges';
 import { ExamLauncherModal } from './ExamLauncherModal';
 import { CareerTestModal } from './CareerTestModal';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, ShieldCheck } from 'lucide-react';
 
 interface StudentDashboardProps {
   student: StudentInfo;
   onLogout: () => void;
   onOpenGuide?: () => void;
   onOpenUserGuide?: () => void;
+  onOpenAdminLogs?: () => void;
 }
 
 export const StudentDashboard: React.FC<StudentDashboardProps> = ({
@@ -45,6 +46,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onLogout,
   onOpenGuide,
   onOpenUserGuide,
+  onOpenAdminLogs,
 }) => {
   const [showExams, setShowExams] = useState(true);
   const [showTips, setShowTips] = useState(false);
@@ -57,7 +59,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [, setTick] = useState(0);
 
   // Admin panel states
-  const isAdmin = student.username === 'admin' || student.sbd === '0003';
+  const isAdmin = isStudentAdmin(student);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [adminScriptUrl, setAdminScriptUrl] = useState(() => getScriptUrl());
   const [copiedScript, setCopiedScript] = useState(false);
@@ -91,6 +93,32 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   return (
     <div id="student-dashboard-section" className="space-y-4">
+      {/* Admin Quick Jump Banner to Trang tính 2 */}
+      {isAdmin && onOpenAdminLogs && (
+        <div className="p-3 bg-gradient-to-r from-indigo-950/60 via-blue-950/40 to-[#0e1224] border border-indigo-500/40 rounded-2xl flex items-center justify-between gap-2 shadow-md">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-amber-400" />
+            <div>
+              <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">
+                Tài khoản quyền Admin (A2 - A6)
+              </span>
+              <span className="text-xs font-bold text-white">
+                Trang tính 2: Lịch sử đăng nhập
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            id="btn-goto-sheet2-logs"
+            onClick={onOpenAdminLogs}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-blue-600/30 cursor-pointer"
+          >
+            <span>Mở Trang tính 2</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Student Profile Card */}
       <div className="bg-[#0b0e1a] border border-[#1f2747] p-4 rounded-2xl space-y-3 text-xs shadow-md">
         <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">

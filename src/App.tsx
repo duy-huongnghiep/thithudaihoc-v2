@@ -13,8 +13,9 @@ import { ExamGuideSection } from './components/ExamGuideSection';
 import { UserGuideModal } from './components/UserGuideModal';
 import { Footer } from './components/Footer';
 import { ActiveTab, StudentInfo } from './types';
-import { getStudentsData, prefetchData } from './services/api';
+import { getStudentsData, prefetchData, isStudentAdmin } from './services/api';
 import { recordLoginToSheet2 } from './services/loginLogger';
+import { AdminSheet2View } from './components/AdminSheet2View';
 import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 const SESSION_STUDENT_KEY = 'td_mock_exam_current_student';
@@ -56,21 +57,40 @@ export default function App() {
   useEffect(() => {
     prefetchData();
     if (currentStudent) {
-      setActiveTab('dashboard');
-      setPreviousTab('dashboard');
+      if (isStudentAdmin(currentStudent)) {
+        setActiveTab('admin-logs');
+        setPreviousTab('admin-logs');
+      } else {
+        setActiveTab('dashboard');
+        setPreviousTab('dashboard');
+      }
     }
   }, []);
 
   // Open Exam Guide
   const handleOpenGuide = () => {
-    setPreviousTab(activeTab === 'guide' ? (currentStudent ? 'dashboard' : 'login') : activeTab);
+    setPreviousTab(
+      activeTab === 'guide'
+        ? currentStudent
+          ? isStudentAdmin(currentStudent)
+            ? 'admin-logs'
+            : 'dashboard'
+          : 'login'
+        : activeTab
+    );
     setActiveTab('guide');
   };
 
   // Back from Exam Guide
   const handleBackFromGuide = () => {
     if (previousTab === 'guide') {
-      setActiveTab(currentStudent ? 'dashboard' : 'login');
+      setActiveTab(
+        currentStudent
+          ? isStudentAdmin(currentStudent)
+            ? 'admin-logs'
+            : 'dashboard'
+          : 'login'
+      );
     } else {
       setActiveTab(previousTab);
     }
@@ -97,9 +117,20 @@ export default function App() {
     } catch {
       // ignore
     }
-    setActiveTab('dashboard');
-    setPreviousTab('dashboard');
-    showToast(`Xin chào thí sinh ${student.hoten || student.username}!`, 'success');
+
+    const admin = isStudentAdmin(student);
+    if (admin) {
+      setActiveTab('admin-logs');
+      setPreviousTab('admin-logs');
+      showToast(
+        `Chào mừng Quản trị viên ${student.hoten || student.username} (Admin A2 - A6)!`,
+        'success'
+      );
+    } else {
+      setActiveTab('dashboard');
+      setPreviousTab('dashboard');
+      showToast(`Xin chào thí sinh ${student.hoten || student.username}!`, 'success');
+    }
 
     // Automatically record student login into Trang tính 2 (Google Sheets)
     recordLoginToSheet2(student).catch(() => {});
@@ -160,8 +191,12 @@ export default function App() {
       <div
         id="app-main-card"
         className={`w-full transition-all duration-300 ${
-          activeTab === 'guide' ? 'max-w-xl' : 'max-w-md'
-        } bg-[#121629] border border-[#1e2540] rounded-3xl p-5 sm:p-8 shadow-2xl shadow-black/60 relative z-10`}
+          activeTab === 'admin-logs'
+            ? 'max-w-6xl'
+            : activeTab === 'guide'
+            ? 'max-w-xl'
+            : 'max-w-md'
+        } bg-[#121629] border border-[#1e2540] rounded-3xl p-4 sm:p-7 shadow-2xl shadow-black/60 relative z-10`}
       >
         <Header
           onRefreshData={handleRefreshData}
@@ -209,6 +244,23 @@ export default function App() {
             </motion.div>
           )}
 
+          {activeTab === 'admin-logs' && currentStudent && (
+            <motion.div
+              key="admin-logs-tab"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18 }}
+            >
+              <AdminSheet2View
+                adminStudent={currentStudent}
+                onLogout={handleLogout}
+                onOpenCandidateView={() => setActiveTab('dashboard')}
+                onOpenGuide={handleOpenGuide}
+              />
+            </motion.div>
+          )}
+
           {activeTab === 'dashboard' && currentStudent && (
             <motion.div
               key="dashboard-tab"
@@ -222,6 +274,11 @@ export default function App() {
                 onLogout={handleLogout}
                 onOpenGuide={handleOpenGuide}
                 onOpenUserGuide={() => setShowUserGuideModal(true)}
+                onOpenAdminLogs={
+                  isStudentAdmin(currentStudent)
+                    ? () => setActiveTab('admin-logs')
+                    : undefined
+                }
               />
             </motion.div>
           )}
@@ -234,9 +291,7 @@ export default function App() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18 }}
             >
-              <ExamGuideSection
-                onBack={handleBackFromGuide}
-              />
+              <ExamGuideSection onBack={handleBackFromGuide} />
             </motion.div>
           )}
         </AnimatePresence>

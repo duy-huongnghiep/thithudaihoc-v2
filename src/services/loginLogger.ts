@@ -76,12 +76,38 @@ export function getLoginLogs(): LoginLogRecord[] {
 }
 
 /**
+ * Fetch all login records of Trang tính 2 from server / Google Sheets
+ */
+export async function fetchSheet2Logs(): Promise<LoginLogRecord[]> {
+  try {
+    const res = await fetch('/api/sheet2-data', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        try {
+          localStorage.setItem(STORAGE_LOGIN_LOGS_KEY, JSON.stringify(data));
+        } catch {
+          // ignore
+        }
+        return data as LoginLogRecord[];
+      }
+    }
+  } catch {
+    // fallback to local
+  }
+  return getLoginLogs();
+}
+
+/**
  * Save new login record to local log list
  */
 function saveLogRecord(record: LoginLogRecord): void {
   try {
     const existing = getLoginLogs();
-    const updated = [record, ...existing.slice(0, 199)]; // Keep latest 200 records
+    const updated = [record, ...existing.slice(0, 499)]; // Keep latest 500 records
     localStorage.setItem(STORAGE_LOGIN_LOGS_KEY, JSON.stringify(updated));
   } catch {
     // Ignore storage issues
@@ -91,9 +117,10 @@ function saveLogRecord(record: LoginLogRecord): void {
 /**
  * Clear all login logs
  */
-export function clearLoginLogs(): void {
+export async function clearLoginLogs(): Promise<void> {
   try {
     localStorage.removeItem(STORAGE_LOGIN_LOGS_KEY);
+    await fetch('/api/clear-logs', { method: 'POST' }).catch(() => {});
   } catch {
     // Ignore
   }
@@ -122,15 +149,18 @@ export async function recordLoginToSheet2(student: StudentInfo): Promise<LoginLo
     synced: false,
   };
 
-  // 1. Always save to local storage immediately so no login is lost
+  // 1. Always save to local storage immediately
   saveLogRecord(record);
 
-  // 2. Transmit to Google Apps Script Web App for "Admin web thi" -> "Trang tính 2"
+  // 2. Transmit to server proxy /api/log-login and Google Apps Script
   const payload = {
+    id: record.id,
     action: 'log_login',
     sheet: 'Trang tính2',
     sheetName: 'Trang tính 2',
     time: timestamp,
+    timestamp,
+    isoDate: record.isoDate,
     hoten: record.hoten,
     sbd: record.sbd,
     username: record.username,
@@ -144,7 +174,7 @@ export async function recordLoginToSheet2(student: StudentInfo): Promise<LoginLo
   try {
     const scriptUrl = getScriptUrl();
 
-    // Strategy A: Server proxy /api/log-login (cleanest, backend-to-backend)
+    // Strategy A: Local server proxy /api/log-login
     fetch('/api/log-login', {
       method: 'POST',
       headers: {
@@ -163,41 +193,97 @@ export async function recordLoginToSheet2(student: StudentInfo): Promise<LoginLo
       body: JSON.stringify(payload),
     }).catch(() => {});
 
-    // Strategy B: GET query param fallback (for Apps Script doGet handlers)
-    const queryParams = new URLSearchParams({
-      action: 'log_login',
-      sheet: 'Trang tính2',
-      time: timestamp,
-      hoten: record.hoten,
-      sbd: record.sbd,
-      username: record.username,
-      monthi: record.monthi,
-      device: record.device,
-    });
-
-    const getUrl = `${scriptUrl}${scriptUrl.includes('?') ? '&' : '?'}${queryParams.toString()}`;
-    fetch(getUrl, {
-      method: 'GET',
-      mode: 'no-cors',
-    }).catch(() => {});
-
-    // Mark as dispatched
     record.synced = true;
   } catch {
-    // Log dispatch error
+    // ignore
   }
 
   return record;
 }
 
 /**
+ * Copy entire logs table as TSV (Tab-Separated Values)
+ * Enables 1-click paste directly into Google Sheets or Microsoft Excel
+ */
+export function copyLogsTableAsTSV(logs: LoginLogRecord[]): boolean {
+  if (!logs || logs.length === 0) return false;
+  const headers = [
+    'STT',
+    'Thời gian đăng nhập',
+    'Họ và tên',
+    'Số báo danh (SBD)',
+    'Tài khoản / SĐT',
+    'Năm sinh',
+    'Email',
+    'Môn thi đã đăng ký',
+    'Thiết bị / Trình duyệt',
+    'Trạng thái',
+  ];
+  const rows = logs.map((l, index) => [
+    index + 1,
+    l.timestamp || '',
+    l.hoten || '',
+    l.sbd || '',
+    l.username || '',
+    l.namsinh || '',
+    l.email || '',
+    l.monthi || '',
+    l.device || '',
+    l.status || 'Đăng nhập thành công',
+  ]);
+  const text = [headers.join('\t'), ...rows.map((r) => r.join('\t'))].join('\n');
+  navigator.clipboard.writeText(text);
+  return true;
+}
+
+/**
+ * Copy clean list of phone numbers (usernames) separated by commas or line breaks
+ */
+export function copyPhoneListFromLogs(logs: LoginLogRecord[], delimiter = ', '): string {
+  const phones = logs
+    .map((l) => l.username?.trim())
+    .filter((u): u is string => Boolean(u && u.length >= 8 && /^\d+$/.test(u)));
+  const unique = Array.from(new Set(phones));
+  const res = unique.join(delimiter);
+  if (res) navigator.clipboard.writeText(res);
+  return res;
+}
+
+/**
+ * Copy clean list of student emails separated by commas
+ */
+export function copyEmailListFromLogs(logs: LoginLogRecord[], delimiter = ', '): string {
+  const emails = logs
+    .map((l) => l.email?.trim())
+    .filter((e): e is string => Boolean(e && e.includes('@')));
+  const unique = Array.from(new Set(emails));
+  const res = unique.join(delimiter);
+  if (res) navigator.clipboard.writeText(res);
+  return res;
+}
+
+/**
+ * Copy list of candidate registration numbers (SBD)
+ */
+export function copySbdListFromLogs(logs: LoginLogRecord[], delimiter = ', '): string {
+  const sbds = logs
+    .map((l) => l.sbd?.trim())
+    .filter((s): s is string => Boolean(s && s !== '---' && !s.toLowerCase().startsWith('ad')));
+  const unique = Array.from(new Set(sbds));
+  const res = unique.join(delimiter);
+  if (res) navigator.clipboard.writeText(res);
+  return res;
+}
+
+/**
  * Export logs to CSV file for Excel / Google Sheets
  */
-export function exportLogsToCSV(): void {
-  const logs = getLoginLogs();
+export function exportLogsToCSV(customLogs?: LoginLogRecord[]): void {
+  const logs = customLogs && customLogs.length > 0 ? customLogs : getLoginLogs();
   if (logs.length === 0) return;
 
   const headers = [
+    'STT',
     'Thời gian đăng nhập',
     'Họ và tên',
     'Số báo danh (SBD)',
@@ -209,16 +295,17 @@ export function exportLogsToCSV(): void {
     'Trạng thái',
   ];
 
-  const rows = logs.map((l) => [
-    `"${l.timestamp}"`,
-    `"${l.hoten.replace(/"/g, '""')}"`,
-    `"${l.sbd.replace(/"/g, '""')}"`,
-    `"${l.username.replace(/"/g, '""')}"`,
+  const rows = logs.map((l, idx) => [
+    idx + 1,
+    `"${(l.timestamp || '').replace(/"/g, '""')}"`,
+    `"${(l.hoten || '').replace(/"/g, '""')}"`,
+    `"${(l.sbd || '').replace(/"/g, '""')}"`,
+    `"${(l.username || '').replace(/"/g, '""')}"`,
     `"${(l.namsinh || '').replace(/"/g, '""')}"`,
     `"${(l.email || '').replace(/"/g, '""')}"`,
-    `"${l.monthi.replace(/"/g, '""')}"`,
-    `"${l.device.replace(/"/g, '""')}"`,
-    `"${l.status.replace(/"/g, '""')}"`,
+    `"${(l.monthi || '').replace(/"/g, '""')}"`,
+    `"${(l.device || '').replace(/"/g, '""')}"`,
+    `"${(l.status || '').replace(/"/g, '""')}"`,
   ]);
 
   const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
@@ -238,23 +325,52 @@ export function exportLogsToCSV(): void {
 export const GOOGLE_APPS_SCRIPT_CODE = `/**
  * ============================================================
  * MÃ GOOGLE APPS SCRIPT CHO FILE "Admin web thi"
- * Tự động ghi nhận thông tin đăng nhập vào "Trang tính 2" ("Trang tính2")
+ * Tự động ghi nhận & tra cứu thông tin đăng nhập từ "Trang tính 2" ("Trang tính2")
  * ============================================================
  */
 
 function doGet(e) {
-  // Nếu có tham số action="log_login" thì gọi ghi vào Trang tính 2
-  if (e && e.parameter && e.parameter.action === "log_login") {
+  var action = e && e.parameter ? e.parameter.action : "";
+  var sheetParam = e && e.parameter ? e.parameter.sheet : "";
+
+  // 1. Nếu có tham số ghi log qua GET
+  if (action === "log_login") {
     return handleLogLogin(e.parameter);
   }
 
-  // Mặc định: Trả về danh sách thí sinh từ Trang tính 1 cho web
+  // 2. Trả về lịch sử đăng nhập từ Trang tính 2
+  if (action === "get_sheet2" || action === "get_logs" || sheetParam === "2" || sheetParam === "Trang tính 2" || sheetParam === "Trang tính2") {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet2 = ss.getSheetByName("Trang tính2") || ss.getSheetByName("Trang tính 2") || ss.getSheets()[1];
+    if (!sheet2 || sheet2.getLastRow() <= 1) {
+      return ContentService.createTextOutput("[]").setMimeType(ContentService.MimeType.JSON);
+    }
+    var rows2 = sheet2.getDataRange().getValues().slice(1);
+    var logs = rows2.map(function(r) {
+      return {
+        time: String(r[0] || "").trim(),
+        hoten: String(r[1] || "").trim(),
+        sbd: String(r[2] || "").trim(),
+        username: String(r[3] || "").trim(),
+        namsinh: String(r[4] || "").trim(),
+        email: String(r[5] || "").trim(),
+        monthi: String(r[6] || "").trim(),
+        device: String(r[7] || "").trim(),
+        status: String(r[8] || "Đăng nhập thành công").trim()
+      };
+    });
+    return ContentService.createTextOutput(JSON.stringify(logs)).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // 3. Mặc định: Trả về danh sách thí sinh từ Trang tính 1 cho web
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Trang tính1") || ss.getSheetByName("Trang tính 1") || ss.getSheets()[0];
   var data = sheet.getDataRange().getValues();
   var rows = data.slice(1); // bỏ dòng tiêu đề
 
-  var result = rows.map(function(r) {
+  var result = rows.map(function(r, index) {
+    var rowNum = index + 2;
+    var isAdmin = rowNum >= 2 && rowNum <= 6;
     return {
       username: String(r[0] || "").trim(),
       password: String(r[1] || "").trim(),
@@ -267,7 +383,9 @@ function doGet(e) {
       thptqg: String(r[8] || "").trim(),
       huongnghiep: String(r[9] || "").trim(),
       batdau: String(r[10] || "").trim(),
-      ketthuc: String(r[11] || "").trim()
+      ketthuc: String(r[11] || "").trim(),
+      rowNumber: rowNum,
+      isAdmin: isAdmin
     };
   });
 

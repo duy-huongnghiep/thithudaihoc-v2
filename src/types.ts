@@ -11,6 +11,8 @@ export interface StudentInfo {
   huongnghiep?: string;
   batdau?: string;
   ketthuc?: string;
+  rowNumber?: number;
+  isAdmin?: boolean;
 }
 
 export interface LoginLogRecord {
@@ -76,7 +78,7 @@ export interface ExamGroup {
   sections: ExamSection[];
 }
 
-export type ActiveTab = 'login' | 'search' | 'dashboard' | 'guide';
+export type ActiveTab = 'login' | 'search' | 'dashboard' | 'guide' | 'admin-logs';
 
 export interface ExamDetailInfo {
   id: 'hsa' | 'vact' | 'thptqg';
