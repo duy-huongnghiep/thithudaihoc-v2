@@ -13,9 +13,16 @@ import { ExamGuideSection } from './components/ExamGuideSection';
 import { UserGuideModal } from './components/UserGuideModal';
 import { Footer } from './components/Footer';
 import { ActiveTab, StudentInfo } from './types';
-import { getStudentsData, prefetchData, isStudentAdmin } from './services/api';
+import {
+  getStudentsData,
+  prefetchData,
+  isStudentAdmin,
+  getGlobalNotice,
+  subscribeGlobalNotice,
+} from './services/api';
 import { recordLoginToSheet2 } from './services/loginLogger';
 import { AdminSheet2View } from './components/AdminSheet2View';
+import { SheetNoticeBanner } from './components/SheetNoticeBanner';
 import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 const SESSION_STUDENT_KEY = 'td_mock_exam_current_student';
@@ -40,6 +47,7 @@ export default function App() {
   }>({ user: '', pass: '' });
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [globalNotice, setGlobalNotice] = useState<string>(() => getGlobalNotice());
   const [toastMessage, setToastMessage] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -53,8 +61,11 @@ export default function App() {
     }, 3000);
   }, []);
 
-  // Prefetch student dataset on initial mount
+  // Prefetch student dataset & subscribe to Google Sheet notice updates
   useEffect(() => {
+    const unsubscribe = subscribeGlobalNotice((notice) => {
+      setGlobalNotice(notice);
+    });
     prefetchData();
     if (currentStudent) {
       if (isStudentAdmin(currentStudent)) {
@@ -65,6 +76,9 @@ export default function App() {
         setPreviousTab('dashboard');
       }
     }
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Open Exam Guide
@@ -203,6 +217,10 @@ export default function App() {
           onOpenUserGuide={() => setShowUserGuideModal(true)}
           isRefreshing={isRefreshing}
         />
+
+        {(activeTab === 'login' || activeTab === 'search' || activeTab === 'dashboard') && (
+          <SheetNoticeBanner notice={globalNotice} />
+        )}
 
         <AnimatePresence mode="wait">
           {activeTab === 'login' && (

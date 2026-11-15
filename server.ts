@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 
 const LOGS_FILE_PATH = path.join(process.cwd(), 'login_logs_store.json');
+const CAREER_RESULTS_FILE_PATH = path.join(process.cwd(), 'career_results_store.json');
 
 // Initialize initial default logs if store doesn't exist yet
 const INITIAL_LOG_SEEDS = [
@@ -122,8 +123,32 @@ function persistLogs(logs: any[]): void {
   }
 }
 
-// In-memory logs store synced with file
+function loadSavedCareerResults(): any[] {
+  try {
+    if (fs.existsSync(CAREER_RESULTS_FILE_PATH)) {
+      const raw = fs.readFileSync(CAREER_RESULTS_FILE_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function persistCareerResults(results: any[]): void {
+  try {
+    fs.writeFileSync(CAREER_RESULTS_FILE_PATH, JSON.stringify(results, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error persisting career results to file:', err);
+  }
+}
+
+// In-memory stores synced with files
 let inMemoryLogs = loadSavedLogs();
+let inMemoryCareerResults = loadSavedCareerResults();
 
 async function startServer() {
   const app = express();
@@ -147,8 +172,13 @@ async function startServer() {
       sbd.startsWith('ad') ||
       item?.isAdmin === true;
 
+    const thongbao = String(
+      item?.thongbao ?? item?.Thongbao ?? item?.thongBao ?? item?.notice ?? ''
+    ).trim();
+
     return {
       ...item,
+      thongbao,
       rowNumber,
       isAdmin,
     };
@@ -336,6 +366,195 @@ async function startServer() {
     inMemoryLogs = [];
     persistLogs(inMemoryLogs);
     res.json({ success: true, message: 'All logs cleared' });
+  });
+
+  // API proxy route to save RIASEC career test results to Google Sheets & persistent server store
+  app.post('/api/log-career', async (req, res) => {
+    try {
+      const payload = req.body;
+      const timestamp = payload.time || payload.timestamp || new Date().toLocaleString('vi-VN');
+
+      const careerRecord = {
+        id: payload.id || `career_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        timestamp,
+        isoDate: payload.isoDate || new Date().toISOString(),
+        hoten: payload.hoten || '',
+        sbd: payload.sbd || '',
+        username: payload.username || '',
+        email: payload.email || '',
+        namsinh: payload.namsinh || '',
+        riasecCode: payload.riasecCode || '',
+        primaryTrait: payload.primaryTrait || '',
+        secondaryTrait: payload.secondaryTrait || '',
+        scores: payload.scores || { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 },
+        scoresText: payload.scoresText || '',
+        recommendedMajors: payload.recommendedMajors || '',
+        recommendedUniversities: payload.recommendedUniversities || '',
+        examFocus: payload.examFocus || '',
+        device: payload.device || '',
+        synced: false,
+      };
+
+      // 1. Save to persistent career results store
+      inMemoryCareerResults = [careerRecord, ...inMemoryCareerResults.slice(0, 499)];
+      persistCareerResults(inMemoryCareerResults);
+
+      // 2. Also add summary log to Trang tính 2 local log list so Admins see it immediately
+      const sheet2LogRecord = {
+        id: `log_${careerRecord.id}`,
+        timestamp,
+        isoDate: careerRecord.isoDate,
+        hoten: careerRecord.hoten,
+        sbd: careerRecord.sbd,
+        username: careerRecord.username,
+        email: careerRecord.email,
+        namsinh: careerRecord.namsinh,
+        monthi: `Hướng nghiệp (Mã: ${careerRecord.riasecCode})`,
+        device: careerRecord.device,
+        status: `KQ: ${careerRecord.riasecCode} (${careerRecord.scoresText}) | ${careerRecord.primaryTrait}`,
+        synced: true,
+      };
+      inMemoryLogs = [sheet2LogRecord, ...inMemoryLogs.slice(0, 499)];
+      persistLogs(inMemoryLogs);
+
+      // 3. Forward to Google Apps Script (supports both custom log_career and fallback handleLogLogin)
+      const customUrl = (req.query.url as string) || (payload.scriptUrl as string) || GOOGLE_SCRIPT_URL;
+      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
+        ? customUrl.trim()
+        : GOOGLE_SCRIPT_URL;
+
+      let gasResponseText = '';
+      let gasSynced = false;
+
+      try {
+        const gasPayload = {
+          action: 'log_career',
+          sheet: 'Kết quả hướng nghiệp',
+          sheetName: 'Kết quả hướng nghiệp',
+          time: timestamp,
+          timestamp,
+          isoDate: careerRecord.isoDate,
+          hoten: careerRecord.hoten,
+          sbd: careerRecord.sbd,
+          username: careerRecord.username,
+          namsinh: careerRecord.namsinh,
+          email: careerRecord.email,
+          monthi: `Hướng nghiệp RIASEC (Mã: ${careerRecord.riasecCode})`,
+          device: careerRecord.device,
+          status: `KQ Hướng nghiệp: ${careerRecord.riasecCode} | ${careerRecord.scoresText} | Nhóm chính: ${careerRecord.primaryTrait} | Ngành: ${careerRecord.recommendedMajors}`,
+          riasecCode: careerRecord.riasecCode,
+          primaryTrait: careerRecord.primaryTrait,
+          secondaryTrait: careerRecord.secondaryTrait,
+          scores: careerRecord.scores,
+          scoresText: careerRecord.scoresText,
+          recommendedMajors: careerRecord.recommendedMajors,
+          recommendedUniversities: careerRecord.recommendedUniversities,
+          examFocus: careerRecord.examFocus,
+        };
+
+        const response = await fetch(cleanUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8',
+          },
+          body: JSON.stringify(gasPayload),
+          redirect: 'follow',
+        });
+        gasResponseText = await response.text();
+        gasSynced = response.ok;
+      } catch {
+        // Keep local record even if external GAS call fails
+      }
+
+      careerRecord.synced = gasSynced;
+      inMemoryCareerResults[0] = careerRecord;
+      persistCareerResults(inMemoryCareerResults);
+
+      return res.json({
+        success: true,
+        synced: gasSynced,
+        record: careerRecord,
+        response: gasResponseText,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown career logging error';
+      return res.status(500).json({ error: msg });
+    }
+  });
+
+  // API route to fetch all career test results (from Google Sheets + local server store)
+  app.get('/api/career-results', async (req, res) => {
+    try {
+      const customUrl = (req.query.url as string) || GOOGLE_SCRIPT_URL;
+      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
+        ? customUrl.trim()
+        : GOOGLE_SCRIPT_URL;
+
+      let sheetCareerResults: any[] = [];
+
+      try {
+        const sep = cleanUrl.includes('?') ? '&' : '?';
+        const targetUrl = `${cleanUrl}${sep}action=get_career_results&_t=${Date.now()}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3500);
+
+        const response = await fetch(targetUrl, {
+          method: 'GET',
+          headers: { Accept: 'application/json, text/plain, */*' },
+          signal: controller.signal,
+          redirect: 'follow',
+        });
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const text = await response.text();
+          if (text.startsWith('[') && !text.includes('<!DOCTYPE')) {
+            const parsed = JSON.parse(text);
+            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].riasecCode !== undefined) {
+              sheetCareerResults = parsed.map((item, idx) => ({
+                id: `gas_career_${idx}_${Date.now()}`,
+                timestamp: item.time || item.timestamp || '',
+                isoDate: item.isoDate || new Date().toISOString(),
+                hoten: item.hoten || '',
+                sbd: item.sbd || '',
+                username: item.username || '',
+                email: item.email || '',
+                namsinh: item.namsinh || '',
+                riasecCode: item.riasecCode || '',
+                primaryTrait: item.primaryTrait || '',
+                secondaryTrait: item.secondaryTrait || '',
+                scores: item.scores || { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 },
+                scoresText: item.scoresText || '',
+                recommendedMajors: item.recommendedMajors || '',
+                recommendedUniversities: item.recommendedUniversities || '',
+                examFocus: item.examFocus || '',
+                device: item.device || '',
+                synced: true,
+              }));
+            }
+          }
+        }
+      } catch {
+        // Fallback to server store
+      }
+
+      const combined = [...sheetCareerResults, ...inMemoryCareerResults];
+      const seen = new Set<string>();
+      const uniqueResults: any[] = [];
+
+      for (const item of combined) {
+        const key = `${item.timestamp}_${item.username}_${item.riasecCode}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueResults.push(item);
+        }
+      }
+
+      return res.json(uniqueResults);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error fetching career results';
+      return res.status(500).json({ error: msg, fallback: inMemoryCareerResults });
+    }
   });
 
   // Health check endpoint

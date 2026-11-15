@@ -312,7 +312,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       )}
 
-      {/* Career Guidance Module (Only shown if student registered for Huongnghiep) */}
+      {/* Career Guidance Module (Direct on-web test + auto-save to Google Sheet) */}
       {hasHuongnghiep && (
         <div
           id="card-career-guidance"
@@ -325,42 +325,32 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </div>
               <div>
                 <span className="text-[10px] text-fuchsia-400 block uppercase font-bold tracking-wider">
-                  Mục hướng nghiệp
+                  Trắc nghiệm trực tiếp trên web
                 </span>
                 <h3 className="font-bold text-white text-xs sm:text-sm">
-                  Trắc Nghiệm Định Hướng Nghề Nghiệp (RIASEC)
+                  Định Hướng Nghề Nghiệp (18 câu RIASEC)
                 </h3>
               </div>
             </div>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 font-mono">
-              KHẢO SÁT
+              TRỰC TIẾP
             </span>
           </div>
 
           <p className="text-xs text-slate-300 leading-relaxed">
-            Tài khoản của bạn đã được kích hoạt mục Hướng nghiệp! Thực hiện bài test hướng nghiệp trực tuyến để nhận kết quả phân tích thế mạnh và định hướng ngành học ĐH 2026.
+            Hoàn thành bài trắc nghiệm 18 câu Holland RIASEC trực tiếp ngay trên web để nhận kết quả phân tích thế mạnh, ngành học ĐH 2026 và khối thi phù hợp.
           </p>
 
-          <div className="space-y-2 pt-1">
-            <a
-              id="link-career-test-official"
-              href="https://huongnghiep.daisugiaoduc.vn/?utm_source=13837"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white font-bold rounded-xl transition text-xs flex items-center justify-center gap-2 shadow-md shadow-fuchsia-600/25 cursor-pointer active:scale-[0.98]"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>Làm Bài Test Hướng Nghiệp Ngay</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-
+          <div className="pt-1">
             <button
               type="button"
               id="btn-open-career-modal"
               onClick={() => setShowCareerModal(true)}
-              className="w-full py-1.5 text-[11px] text-fuchsia-400 hover:text-fuchsia-300 transition text-center underline cursor-pointer"
+              className="w-full py-2.5 px-4 bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white font-bold rounded-xl transition text-xs flex items-center justify-center gap-2 shadow-md shadow-fuchsia-600/25 cursor-pointer active:scale-[0.98]"
             >
-              Hoặc làm khảo sát nhanh 18 câu RIASEC trực tiếp trên web
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Làm Bài Test Hướng Nghiệp Trực Tiếp</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

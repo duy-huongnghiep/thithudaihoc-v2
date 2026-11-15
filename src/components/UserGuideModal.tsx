@@ -154,21 +154,17 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
       title: 'Test Hướng Nghiệp',
       icon: Compass,
       color: 'fuchsia',
-      shortDesc: 'Khảo sát 18 câu Holland RIASEC & chọn ngành ĐH',
+      shortDesc: 'Làm bài test 18 câu RIASEC trực tiếp trên web',
       content: {
-        heading: 'Bước 6: Trắc nghiệm hướng nghiệp RIASEC (Nếu có đăng ký)',
+        heading: 'Bước 6: Trắc nghiệm hướng nghiệp RIASEC trực tiếp trên web',
         description:
-          'Dành cho các thí sinh có tích chọn mục Hướng nghiệp khi điền form đăng ký.',
+          'Dành cho các thí sinh có tích chọn mục Hướng nghiệp khi đăng ký. Làm trực tiếp ngay trên web để khám phá nhóm tính cách và ngành học phù hợp.',
         bulletPoints: [
-          'Tại Dashboard, bạn sẽ thấy thẻ nổi bật "Trắc Nghiệm Định Hướng Nghề Nghiệp (RIASEC)".',
-          'Nhấn "Làm Bài Test Hướng Nghiệp Ngay" để mở cổng trắc nghiệm hướng nghiệp chính thức của Đại Sứ Giáo Dục.',
-          'Đánh giá mức độ phù hợp với bản thân qua các câu hỏi khảo sát chuẩn khoa học.',
-          'Hệ thống tính điểm và phân tích chi tiết nhóm tính cách và thiên hướng nghề nghiệp của bạn.',
-          'Nhận ngay gợi ý danh sách ngành nghề phù hợp xu hướng tuyển sinh 2026 và các trường ĐH đào tạo top đầu Việt Nam!',
+          'Tại trang cá nhân, bạn sẽ thấy thẻ "Định Hướng Nghề Nghiệp (18 câu RIASEC)".',
+          'Nhấn nút "Làm Bài Test Hướng Nghiệp Trực Tiếp" để mở bảng khảo sát ngay trên web.',
+          'Trả lời lần lượt 18 câu hỏi đánh giá mức độ phù hợp với bản thân.',
+          'Bấm "Xem Kết Quả Định Hướng" để nhận phân tích nhóm tính cách RIASEC, top ngành học và trường ĐH đề xuất.',
         ],
-        actionLabel: 'Mở Cổng Hướng Nghiệp (daisugiaoduc.vn)',
-        actionUrl: 'https://huongnghiep.daisugiaoduc.vn/?utm_source=13837',
-        actionExternal: true,
       },
     },
     {

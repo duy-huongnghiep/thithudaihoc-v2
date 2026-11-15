@@ -1,7 +1,8 @@
-import { StudentInfo, LoginLogRecord } from '../types';
+import { StudentInfo, LoginLogRecord, CareerResultRecord } from '../types';
 import { isYes, getScriptUrl } from './api';
 
 const STORAGE_LOGIN_LOGS_KEY = 'td_mock_exam_login_logs';
+const STORAGE_CAREER_RESULTS_KEY = 'td_mock_exam_career_results';
 
 /**
  * Format timestamp in Vietnam timezone (GMT+7)
@@ -320,12 +321,253 @@ export function exportLogsToCSV(customLogs?: LoginLogRecord[]): void {
 }
 
 /**
+ * Retrieve local saved career test results
+ */
+export function getLocalCareerResults(): CareerResultRecord[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_CAREER_RESULTS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as CareerResultRecord[];
+  } catch {
+    return [];
+  }
+}
+
+export function getLatestCareerResultForStudent(username: string, sbd?: string): CareerResultRecord | null {
+  const list = getLocalCareerResults();
+  return (
+    list.find(
+      (r) =>
+        (username && r.username === username) ||
+        (sbd && sbd !== '---' && r.sbd === sbd)
+    ) || null
+  );
+}
+
+function saveLocalCareerResult(record: CareerResultRecord): void {
+  try {
+    const existing = getLocalCareerResults();
+    const updated = [record, ...existing.slice(0, 199)];
+    localStorage.setItem(STORAGE_CAREER_RESULTS_KEY, JSON.stringify(updated));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Save career test result (RIASEC) directly to Google Sheets + server store
+ */
+export async function recordCareerResultToSheet(
+  student: StudentInfo,
+  data: {
+    riasecCode: string;
+    primaryTrait: string;
+    secondaryTrait: string;
+    scores: { R: number; I: number; A: number; S: number; E: number; C: number };
+    recommendedMajors: string[];
+    recommendedUniversities: string[];
+    examFocus: string;
+  }
+): Promise<CareerResultRecord> {
+  const timestamp = formatVietnamTime();
+  const device = getDeviceInfo();
+  const scoresText = `R:${data.scores.R} | I:${data.scores.I} | A:${data.scores.A} | S:${data.scores.S} | E:${data.scores.E} | C:${data.scores.C}`;
+
+  const record: CareerResultRecord = {
+    id: `career_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    timestamp,
+    isoDate: new Date().toISOString(),
+    hoten: student.hoten || 'Chưa cập nhật',
+    sbd: student.sbd || '---',
+    username: student.username || '',
+    email: student.email || '',
+    namsinh: student.namsinh || '',
+    riasecCode: data.riasecCode,
+    primaryTrait: data.primaryTrait,
+    secondaryTrait: data.secondaryTrait,
+    scores: data.scores,
+    scoresText,
+    recommendedMajors: data.recommendedMajors.join(', '),
+    recommendedUniversities: data.recommendedUniversities.join(', '),
+    examFocus: data.examFocus,
+    device,
+    synced: false,
+  };
+
+  // Save immediately to localStorage
+  saveLocalCareerResult(record);
+
+  const scriptUrl = getScriptUrl();
+  const payload = {
+    ...record,
+    time: timestamp,
+    scriptUrl,
+  };
+
+  try {
+    const res = await fetch('/api/log-career', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      record.synced = Boolean(json?.success);
+    }
+  } catch {
+    // Backup direct client no-cors POST if backend proxy is unavailable
+    try {
+      fetch(scriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify({
+          action: 'log_career',
+          sheet: 'Kết quả hướng nghiệp',
+          time: timestamp,
+          hoten: record.hoten,
+          sbd: record.sbd,
+          username: record.username,
+          namsinh: record.namsinh,
+          email: record.email,
+          monthi: `Hướng nghiệp RIASEC (Mã: ${record.riasecCode})`,
+          device: record.device,
+          status: `KQ Hướng nghiệp: ${record.riasecCode} | ${record.scoresText} | ${record.primaryTrait}`,
+          riasecCode: record.riasecCode,
+          primaryTrait: record.primaryTrait,
+          secondaryTrait: record.secondaryTrait,
+          scores: record.scores,
+          scoresText: record.scoresText,
+          recommendedMajors: record.recommendedMajors,
+          recommendedUniversities: record.recommendedUniversities,
+          examFocus: record.examFocus,
+        }),
+      }).catch(() => {});
+      record.synced = true;
+    } catch {
+      // ignore
+    }
+  }
+
+  return record;
+}
+
+/**
+ * Fetch all career test results from server & Google Sheets
+ */
+export async function fetchCareerResults(): Promise<CareerResultRecord[]> {
+  try {
+    const res = await fetch('/api/career-results', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        try {
+          localStorage.setItem(STORAGE_CAREER_RESULTS_KEY, JSON.stringify(data));
+        } catch {
+          // ignore
+        }
+        return data as CareerResultRecord[];
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return getLocalCareerResults();
+}
+
+export function copyCareerResultsAsTSV(results: CareerResultRecord[]): boolean {
+  if (!results || results.length === 0) return false;
+  const headers = [
+    'STT',
+    'Thời gian làm bài',
+    'Họ và tên',
+    'Số báo danh (SBD)',
+    'Tài khoản / SĐT',
+    'Email',
+    'Mã RIASEC',
+    'Nhóm tính cách chính',
+    'Điểm chi tiết (R-I-A-S-E-C)',
+    'Ngành học đề xuất',
+    'Khối thi tập trung',
+  ];
+  const rows = results.map((r, index) => [
+    index + 1,
+    r.timestamp || '',
+    r.hoten || '',
+    r.sbd || '',
+    r.username || '',
+    r.email || '',
+    r.riasecCode || '',
+    r.primaryTrait || '',
+    r.scoresText || '',
+    r.recommendedMajors || '',
+    r.examFocus || '',
+  ]);
+  const text = [headers.join('\t'), ...rows.map((row) => row.join('\t'))].join('\n');
+  navigator.clipboard.writeText(text);
+  return true;
+}
+
+export function exportCareerResultsToCSV(customResults?: CareerResultRecord[]): void {
+  const results = customResults && customResults.length > 0 ? customResults : getLocalCareerResults();
+  if (results.length === 0) return;
+
+  const headers = [
+    'STT',
+    'Thời gian làm bài',
+    'Họ và tên',
+    'Số báo danh (SBD)',
+    'Tài khoản / SĐT',
+    'Email',
+    'Mã RIASEC',
+    'Nhóm tính cách chính',
+    'Điểm chi tiết (R-I-A-S-E-C)',
+    'Ngành học đề xuất',
+    'Khối thi tập trung',
+  ];
+
+  const rows = results.map((r, idx) => [
+    idx + 1,
+    `"${(r.timestamp || '').replace(/"/g, '""')}"`,
+    `"${(r.hoten || '').replace(/"/g, '""')}"`,
+    `"${(r.sbd || '').replace(/"/g, '""')}"`,
+    `"${(r.username || '').replace(/"/g, '""')}"`,
+    `"${(r.email || '').replace(/"/g, '""')}"`,
+    `"${(r.riasecCode || '').replace(/"/g, '""')}"`,
+    `"${(r.primaryTrait || '').replace(/"/g, '""')}"`,
+    `"${(r.scoresText || '').replace(/"/g, '""')}"`,
+    `"${(r.recommendedMajors || '').replace(/"/g, '""')}"`,
+    `"${(r.examFocus || '').replace(/"/g, '""')}"`,
+  ]);
+
+  const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `ket_qua_huong_nghiep_riasec_${Date.now()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+/**
  * Ready-to-use Google Apps Script code for the user's "Admin web thi" spreadsheet
  */
 export const GOOGLE_APPS_SCRIPT_CODE = `/**
  * ============================================================
  * MÃ GOOGLE APPS SCRIPT CHO FILE "Admin web thi"
- * Tự động ghi nhận & tra cứu thông tin đăng nhập từ "Trang tính 2" ("Trang tính2")
+ * Tự động ghi nhận:
+ * 1. Lịch sử đăng nhập vào "Trang tính 2" ("Trang tính2")
+ * 2. Kết quả test hướng nghiệp RIASEC vào sheet "Kết quả hướng nghiệp"
  * ============================================================
  */
 
@@ -338,7 +580,33 @@ function doGet(e) {
     return handleLogLogin(e.parameter);
   }
 
-  // 2. Trả về lịch sử đăng nhập từ Trang tính 2
+  // 2. Trả về kết quả hướng nghiệp từ sheet "Kết quả hướng nghiệp"
+  if (action === "get_career_results") {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetCareer = ss.getSheetByName("Kết quả hướng nghiệp");
+    if (!sheetCareer || sheetCareer.getLastRow() <= 1) {
+      return ContentService.createTextOutput("[]").setMimeType(ContentService.MimeType.JSON);
+    }
+    var rowsC = sheetCareer.getDataRange().getValues().slice(1);
+    var results = rowsC.map(function(r) {
+      return {
+        time: String(r[0] || "").trim(),
+        hoten: String(r[1] || "").trim(),
+        sbd: String(r[2] || "").trim(),
+        username: String(r[3] || "").trim(),
+        email: String(r[4] || "").trim(),
+        riasecCode: String(r[5] || "").trim(),
+        primaryTrait: String(r[6] || "").trim(),
+        scoresText: String(r[7] || "").trim(),
+        recommendedMajors: String(r[8] || "").trim(),
+        examFocus: String(r[9] || "").trim(),
+        device: String(r[10] || "").trim()
+      };
+    });
+    return ContentService.createTextOutput(JSON.stringify(results)).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // 3. Trả về lịch sử đăng nhập từ Trang tính 2
   if (action === "get_sheet2" || action === "get_logs" || sheetParam === "2" || sheetParam === "Trang tính 2" || sheetParam === "Trang tính2") {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet2 = ss.getSheetByName("Trang tính2") || ss.getSheetByName("Trang tính 2") || ss.getSheets()[1];
@@ -362,15 +630,30 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify(logs)).setMimeType(ContentService.MimeType.JSON);
   }
 
-  // 3. Mặc định: Trả về danh sách thí sinh từ Trang tính 1 cho web
+  // 4. Mặc định: Trả về danh sách thí sinh từ Trang tính 1 cho web
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Trang tính1") || ss.getSheetByName("Trang tính 1") || ss.getSheets()[0];
   var data = sheet.getDataRange().getValues();
+  var headers = data.length > 0 ? data[0] : [];
+  var thongbaoCol = -1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || "").toLowerCase().replace(/\s+/g, "").trim();
+    if (h === "thongbao" || h === "thôngbáo" || h === "notice") {
+      thongbaoCol = c;
+      break;
+    }
+  }
   var rows = data.slice(1); // bỏ dòng tiêu đề
 
   var result = rows.map(function(r, index) {
     var rowNum = index + 2;
     var isAdmin = rowNum >= 2 && rowNum <= 6;
+    var tbVal = "";
+    if (thongbaoCol >= 0 && r[thongbaoCol]) {
+      tbVal = String(r[thongbaoCol]).trim();
+    } else {
+      tbVal = String(r[12] || r[13] || r[14] || "").trim();
+    }
     return {
       username: String(r[0] || "").trim(),
       password: String(r[1] || "").trim(),
@@ -384,6 +667,7 @@ function doGet(e) {
       huongnghiep: String(r[9] || "").trim(),
       batdau: String(r[10] || "").trim(),
       ketthuc: String(r[11] || "").trim(),
+      thongbao: tbVal,
       rowNumber: rowNum,
       isAdmin: isAdmin
     };
@@ -409,7 +693,67 @@ function doPost(e) {
   } catch (err) {
     data = (e && e.parameter) ? e.parameter : {};
   }
+
+  if (data && data.action === "log_career") {
+    return handleLogCareer(data);
+  }
   return handleLogLogin(data);
+}
+
+function handleLogCareer(data) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Kết quả hướng nghiệp");
+    if (!sheet) {
+      sheet = ss.insertSheet("Kết quả hướng nghiệp");
+    }
+
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "Thời gian hoàn thành",
+        "Họ và tên",
+        "Số báo danh (SBD)",
+        "Tài khoản / SĐT",
+        "Email",
+        "Mã RIASEC",
+        "Nhóm tính cách chính",
+        "Điểm chi tiết (R-I-A-S-E-C)",
+        "Ngành học đề xuất",
+        "Khối thi / Kỳ thi nên tập trung",
+        "Thiết bị"
+      ]);
+      var headerRange = sheet.getRange(1, 1, 1, 11);
+      headerRange.setFontWeight("bold");
+      headerRange.setBackground("#fae8ff");
+      headerRange.setHorizontalAlignment("center");
+      sheet.setFrozenRows(1);
+    }
+
+    var time = data.time || Utilities.formatDate(new Date(), "GMT+7", "dd/MM/yyyy HH:mm:ss");
+    sheet.appendRow([
+      time,
+      data.hoten || "",
+      data.sbd || "",
+      data.username || "",
+      data.email || "",
+      data.riasecCode || "",
+      data.primaryTrait || "",
+      data.scoresText || "",
+      data.recommendedMajors || "",
+      data.examFocus || "",
+      data.device || ""
+    ]);
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      message: "Đã lưu kết quả hướng nghiệp vào Google Sheet thành công!"
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 function handleLogLogin(data) {

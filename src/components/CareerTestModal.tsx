@@ -10,12 +10,15 @@ import {
   Briefcase,
   Layers,
   Building2,
+  Loader2,
 } from 'lucide-react';
-import { StudentInfo } from '../types';
+import { StudentInfo, CareerResultRecord } from '../types';
+import { recordCareerResultToSheet } from '../services/loginLogger';
 
 interface CareerTestModalProps {
   student: StudentInfo;
   onClose: () => void;
+  onResultSaved?: (record: CareerResultRecord) => void;
 }
 
 interface Question {
@@ -296,9 +299,14 @@ const TRAIT_INFO: Record<
   },
 };
 
-export const CareerTestModal: React.FC<CareerTestModalProps> = ({ student, onClose }) => {
+export const CareerTestModal: React.FC<CareerTestModalProps> = ({
+  student,
+  onClose,
+  onResultSaved,
+}) => {
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const answeredCount = Object.keys(answers).length;
   const isComplete = answeredCount === QUESTIONS.length;
@@ -339,6 +347,37 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({ student, onClo
 
   const primaryInfo = TRAIT_INFO[primaryTrait];
   const secondaryInfo = TRAIT_INFO[secondaryTrait];
+
+  const handleSaveToGoogleSheet = async () => {
+    setIsSaving(true);
+    try {
+      const riasecCode = `${primaryTrait}${secondaryTrait}${tertiaryTrait}`;
+      const recommendedMajors = [
+        ...primaryInfo.majors.slice(0, 3),
+        ...secondaryInfo.majors.slice(0, 2),
+      ];
+      const rec = await recordCareerResultToSheet(student, {
+        riasecCode,
+        primaryTrait: `${primaryTrait} - ${primaryInfo.fullName}`,
+        secondaryTrait: `${secondaryTrait} - ${secondaryInfo.fullName}`,
+        scores,
+        recommendedMajors,
+        recommendedUniversities: primaryInfo.universities,
+        examFocus: primaryInfo.examFocus,
+      });
+      onResultSaved?.(rec);
+    } catch {
+      // ignore
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSubmitTest = async () => {
+    if (!isComplete) return;
+    setSubmitted(true);
+    await handleSaveToGoogleSheet();
+  };
 
   return (
     <div
@@ -461,12 +500,21 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({ student, onClo
               <button
                 type="button"
                 id="btn-submit-career-test"
-                disabled={!isComplete}
-                onClick={() => setSubmitted(true)}
+                disabled={!isComplete || isSaving}
+                onClick={handleSubmitTest}
                 className="py-3 px-6 bg-gradient-to-r from-fuchsia-600 via-purple-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white font-bold rounded-xl transition text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-fuchsia-600/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
-                <span>Xem Kết Quả Định Hướng</span>
-                <ArrowRight className="w-4 h-4" />
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang phân tích kết quả...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Xem Kết Quả Định Hướng</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </div>
           </div>

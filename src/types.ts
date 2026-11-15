@@ -11,6 +11,7 @@ export interface StudentInfo {
   huongnghiep?: string;
   batdau?: string;
   ketthuc?: string;
+  thongbao?: string;
   rowNumber?: number;
   isAdmin?: boolean;
 }
@@ -27,6 +28,34 @@ export interface LoginLogRecord {
   monthi: string;
   device: string;
   status: string;
+  synced: boolean;
+}
+
+export interface CareerResultRecord {
+  id: string;
+  timestamp: string;
+  isoDate: string;
+  hoten: string;
+  sbd: string;
+  username: string;
+  email?: string;
+  namsinh?: string;
+  riasecCode: string;
+  primaryTrait: string;
+  secondaryTrait: string;
+  scores: {
+    R: number;
+    I: number;
+    A: number;
+    S: number;
+    E: number;
+    C: number;
+  };
+  scoresText: string;
+  recommendedMajors: string;
+  recommendedUniversities: string;
+  examFocus: string;
+  device: string;
   synced: boolean;
 }
 

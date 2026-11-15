@@ -25,19 +25,24 @@ import {
   FileText,
   AlertCircle,
   ExternalLink,
+  Compass,
+  Megaphone,
 } from 'lucide-react';
-import { LoginLogRecord, StudentInfo } from '../types';
+import { LoginLogRecord, StudentInfo, CareerResultRecord } from '../types';
 import {
   fetchSheet2Logs,
+  fetchCareerResults,
   copyLogsTableAsTSV,
+  copyCareerResultsAsTSV,
   copyPhoneListFromLogs,
   copyEmailListFromLogs,
   copySbdListFromLogs,
   exportLogsToCSV,
+  exportCareerResultsToCSV,
   clearLoginLogs,
   GOOGLE_APPS_SCRIPT_CODE,
 } from '../services/loginLogger';
-import { getStudentsData, setScriptUrl, getScriptUrl } from '../services/api';
+import { getStudentsData, setScriptUrl, getScriptUrl, getGlobalNotice, subscribeGlobalNotice } from '../services/api';
 
 interface AdminSheet2ViewProps {
   adminStudent: StudentInfo;
@@ -53,15 +58,18 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
   onOpenGuide,
 }) => {
   const [logs, setLogs] = useState<LoginLogRecord[]>([]);
+  const [careerResults, setCareerResults] = useState<CareerResultRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeAdminTab, setActiveAdminTab] = useState<'sheet2' | 'sheet1' | 'script'>('sheet2');
+  const [activeAdminTab, setActiveAdminTab] = useState<'sheet2' | 'career' | 'sheet1' | 'script'>('sheet2');
 
-  // Sheet 1 candidates data
+  // Sheet 1 candidates data & live global notice
   const [sheet1Students, setSheet1Students] = useState<StudentInfo[]>([]);
+  const [globalNotice, setGlobalNotice] = useState<string>(() => getGlobalNotice());
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
+  const [careerSearchQuery, setCareerSearchQuery] = useState('');
   const [examFilter, setExamFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | '24h' | '7days'>('all');
   const [deviceFilter, setDeviceFilter] = useState<string>('all');
@@ -76,12 +84,16 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
   const [scriptUrlInput, setScriptUrlInput] = useState(() => getScriptUrl());
   const [scriptUrlSaved, setScriptUrlSaved] = useState(false);
 
-  // Load initial logs from Trang tính 2
+  // Load initial logs from Trang tính 2 & Career Results
   const loadLogs = async (force = false) => {
     if (force) setIsRefreshing(true);
     try {
-      const data = await fetchSheet2Logs();
+      const [data, careerData] = await Promise.all([
+        fetchSheet2Logs(),
+        fetchCareerResults(),
+      ]);
       setLogs(data);
+      setCareerResults(careerData);
     } catch {
       // ignore
     } finally {
@@ -103,7 +115,22 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
   useEffect(() => {
     loadLogs();
     loadSheet1();
+    const unsub = subscribeGlobalNotice((notice) => setGlobalNotice(notice));
+    return () => unsub();
   }, []);
+
+  const filteredCareerResults = useMemo(() => {
+    const q = careerSearchQuery.trim().toLowerCase();
+    if (!q) return careerResults;
+    return careerResults.filter(
+      (r) =>
+        (r.hoten || '').toLowerCase().includes(q) ||
+        (r.sbd || '').toLowerCase().includes(q) ||
+        (r.username || '').toLowerCase().includes(q) ||
+        (r.riasecCode || '').toLowerCase().includes(q) ||
+        (r.primaryTrait || '').toLowerCase().includes(q)
+    );
+  }, [careerResults, careerSearchQuery]);
 
   const triggerCopyFeedback = (msg: string) => {
     setCopyFeedback(msg);
@@ -342,7 +369,7 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
       </div>
 
       {/* Main Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-2 flex-wrap">
         <button
           type="button"
           onClick={() => setActiveAdminTab('sheet2')}
@@ -356,6 +383,22 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
           <span>Lịch sử đăng nhập (Trang tính 2)</span>
           <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/30 font-mono">
             {logs.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveAdminTab('career')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            activeAdminTab === 'career'
+              ? 'bg-fuchsia-600 text-white shadow-md shadow-fuchsia-600/20'
+              : 'bg-[#0f1325] text-slate-400 hover:text-slate-200 border border-slate-800'
+          }`}
+        >
+          <Compass className="w-3.5 h-3.5" />
+          <span>Kết quả Hướng nghiệp</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/30 font-mono">
+            {careerResults.length}
           </span>
         </button>
 
@@ -879,6 +922,126 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
         </div>
       )}
 
+      {/* TAB CAREER: Kết quả Hướng nghiệp (RIASEC) đã lưu về Google Sheet */}
+      {activeAdminTab === 'career' && (
+        <div className="space-y-4">
+          <div className="p-3.5 bg-[#0e1224] border border-fuchsia-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                <Compass className="w-4 h-4 text-fuchsia-400" />
+                <span>Kết Quả Trắc Nghiệm Hướng Nghiệp (RIASEC)</span>
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Thí sinh làm bài trực tiếp trên web và kết quả tự động lưu về Google Sheet.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  if (copyCareerResultsAsTSV(filteredCareerResults)) {
+                    triggerCopyFeedback('Đã sao chép bảng kết quả hướng nghiệp (Dán Ctrl+V vào Google Sheet)!');
+                  }
+                }}
+                className="px-3 py-2 bg-fuchsia-600/30 hover:bg-fuchsia-600/50 border border-fuchsia-500/40 text-fuchsia-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy bảng (Sheets/Excel)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  exportCareerResultsToCSV(filteredCareerResults);
+                  triggerCopyFeedback('Đang tải file CSV kết quả hướng nghiệp...');
+                }}
+                className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Xuất CSV</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={careerSearchQuery}
+              onChange={(e) => setCareerSearchQuery(e.target.value)}
+              placeholder="Tìm theo Tên thí sinh, SBD, SĐT, Mã RIASEC (VD: RIA)..."
+              className="w-full pl-9 pr-3 py-2 bg-[#080b17] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-fuchsia-500 transition"
+            />
+          </div>
+
+          <div className="border border-slate-800 rounded-2xl overflow-hidden bg-[#0a0d1c] shadow-lg">
+            <div className="overflow-x-auto max-h-[540px] overflow-y-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-[#12162e] text-slate-300 font-bold uppercase text-[10px] tracking-wider sticky top-0 z-20 border-b border-slate-700">
+                  <tr>
+                    <th className="py-3 px-3 w-12 text-center">STT</th>
+                    <th className="py-3 px-3 min-w-[140px]">Thời gian</th>
+                    <th className="py-3 px-3 min-w-[150px]">Họ và tên</th>
+                    <th className="py-3 px-3 min-w-[80px]">SBD</th>
+                    <th className="py-3 px-3 min-w-[110px]">Tài khoản</th>
+                    <th className="py-3 px-3 min-w-[90px]">Mã RIASEC</th>
+                    <th className="py-3 px-3 min-w-[160px]">Nhóm tính cách chính</th>
+                    <th className="py-3 px-3 min-w-[180px]">Điểm chi tiết</th>
+                    <th className="py-3 px-3 min-w-[220px]">Ngành học đề xuất</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80">
+                  {filteredCareerResults.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-slate-500">
+                        <Compass className="w-8 h-8 mx-auto mb-2 opacity-40 text-fuchsia-400" />
+                        <p className="font-semibold text-slate-400">Chưa có kết quả trắc nghiệm hướng nghiệp nào</p>
+                        <p className="text-[11px] text-slate-600 mt-0.5">
+                          Khi thí sinh hoàn thành bài test trực tiếp trên web, kết quả sẽ tự động hiển thị tại đây và lưu về Google Sheet.
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCareerResults.map((res, idx) => (
+                      <tr key={res.id || idx} className="hover:bg-[#131835]/70 transition-colors">
+                        <td className="py-2.5 px-3 text-center text-slate-500 font-mono text-[11px]">
+                          {idx + 1}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                          {res.timestamp || '---'}
+                        </td>
+                        <td className="py-2.5 px-3 font-semibold text-white">
+                          {res.hoten || 'Chưa cập nhật'}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-blue-400">
+                          {res.sbd || '---'}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-300">
+                          {res.username || '---'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40">
+                            {res.riasecCode || '---'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-200 font-medium">
+                          {res.primaryTrait || '---'}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                          {res.scoresText || '---'}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300 text-[11px]">
+                          {res.recommendedMajors || '---'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TAB 2: Trang tính 1 - Danh sách tài khoản (Trang tính 1 của Google Sheet) */}
       {activeAdminTab === 'sheet1' && (
         <div className="space-y-3">
@@ -895,6 +1058,28 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
             <span className="text-xs text-blue-400 font-mono font-bold">
               Tổng cộng: {sheet1Students.length} tài khoản
             </span>
+          </div>
+
+          <div
+            className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+              globalNotice
+                ? 'bg-amber-950/35 border-amber-500/40 text-amber-200'
+                : 'bg-[#0b0e1a] border-slate-800 text-slate-400'
+            }`}
+          >
+            <Megaphone className={`w-4 h-4 shrink-0 mt-0.5 ${globalNotice ? 'text-amber-400' : 'text-slate-500'}`} />
+            <div className="min-w-0 flex-1">
+              <span className="font-bold block text-[11px] uppercase tracking-wider mb-0.5">
+                Trạng thái mục &quot;Thongbao&quot; (Cột M–O trên Google Sheet):
+              </span>
+              {globalNotice ? (
+                <p className="text-amber-100 whitespace-pre-line leading-relaxed">{globalNotice}</p>
+              ) : (
+                <p className="text-slate-500 italic">
+                  Hiện đang trống — trang web không hiển thị banner thông báo cho thí sinh.
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="border border-slate-800 rounded-2xl overflow-hidden bg-[#0a0d1c] shadow-lg">
@@ -989,8 +1174,7 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
               <span>Cấu Hình Tự Động Ghi Vào &quot;Trang tính 2&quot;</span>
             </h3>
             <p className="text-slate-400 mt-1 leading-relaxed">
-              Hệ thống đã tự động tích hợp mã Google Apps Script hoàn chỉnh để khi thí sinh đăng nhập,
-              thông tin sẽ được gửi thẳng vào <strong>Trang tính 2</strong> của file Google Sheets &quot;Admin web thi&quot;.
+              Hệ thống đã tự động tích hợp mã Google Apps Script hoàn chỉnh để đồng bộ danh sách thí sinh &amp; cột <strong>Thongbao (M–O)</strong> từ <strong>Trang tính 1</strong>, ghi lịch sử đăng nhập vào <strong>Trang tính 2</strong> và lưu kết quả test hướng nghiệp.
             </p>
           </div>
 

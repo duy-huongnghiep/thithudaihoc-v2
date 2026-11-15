@@ -7,6 +7,7 @@ const STORAGE_CUSTOM_URL_KEY = 'td_mock_exam_custom_script_url';
 const CACHE_KEY = 'td_mock_exam_students_cache';
 const CACHE_TIME_KEY = 'td_mock_exam_students_time';
 const CACHE_SCHEDULE_KEY = 'td_mock_exam_global_schedule';
+const CACHE_NOTICE_KEY = 'td_mock_exam_global_notice';
 const CACHE_TTL_MS = 5 * 1000; // 5 seconds cache TTL for high freshness
 
 /**
@@ -14,7 +15,7 @@ const CACHE_TTL_MS = 5 * 1000; // 5 seconds cache TTL for high freshness
  * Ensures instant login & tra cuu even if Google Apps Script is deploying or temporarily unavailable
  */
 const CACHE_VERSION_KEY = 'td_mock_exam_cache_ver';
-const CURRENT_CACHE_VERSION = 'v5_admin_a2_a6_roles';
+const CURRENT_CACHE_VERSION = 'v6_sheet_thongbao';
 
 export const DEFAULT_STUDENTS_SEED: StudentInfo[] = [
   {
@@ -383,6 +384,91 @@ let inMemoryGlobalSchedule: { batdau: string; ketthuc: string } = (() => {
   return { batdau: '', ketthuc: '' };
 })();
 
+let inMemoryGlobalNotice: string = (() => {
+  try {
+    return localStorage.getItem(CACHE_NOTICE_KEY) || '';
+  } catch {
+    return '';
+  }
+})();
+
+const noticeListeners = new Set<(notice: string) => void>();
+
+export function getGlobalNotice(): string {
+  return inMemoryGlobalNotice;
+}
+
+export function subscribeGlobalNotice(listener: (notice: string) => void): () => void {
+  noticeListeners.add(listener);
+  return () => {
+    noticeListeners.delete(listener);
+  };
+}
+
+function setGlobalNotice(value: string): void {
+  const normalized = value.trim();
+  if (inMemoryGlobalNotice === normalized) return;
+  inMemoryGlobalNotice = normalized;
+  try {
+    if (normalized) {
+      localStorage.setItem(CACHE_NOTICE_KEY, normalized);
+    } else {
+      localStorage.removeItem(CACHE_NOTICE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+  noticeListeners.forEach((cb) => {
+    try {
+      cb(normalized);
+    } catch {
+      // ignore
+    }
+  });
+}
+
+function extractNoticeFromRawItem(item: unknown): string {
+  if (!item) return '';
+  if (Array.isArray(item)) {
+    return String(item[12] || item[13] || item[14] || '').trim();
+  }
+  const rec = item as Record<string, unknown>;
+  const direct =
+    rec['thongbao'] ??
+    rec['Thongbao'] ??
+    rec['thongBao'] ??
+    rec['ThongBao'] ??
+    rec['thong_bao'] ??
+    rec['Thông báo'] ??
+    rec['notice'] ??
+    rec['announcement'];
+  if (direct !== undefined && direct !== null && String(direct).trim()) {
+    return String(direct).trim();
+  }
+  for (const k of Object.keys(rec)) {
+    const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanK === 'thongbao' || cleanK === 'notice' || cleanK === 'announcement') {
+      const v = String(rec[k] ?? '').trim();
+      if (v) return v;
+    }
+  }
+  return '';
+}
+
+function syncGlobalNoticeFromRawRows(rawData: unknown[]): void {
+  const seen = new Set<string>();
+  const notices: string[] = [];
+  for (const row of rawData) {
+    const msg = extractNoticeFromRawItem(row);
+    if (msg && !seen.has(msg)) {
+      seen.add(msg);
+      notices.push(msg);
+    }
+  }
+  // If no notice exists in Sheet, setGlobalNotice('') clears it immediately!
+  setGlobalNotice(notices.join('\n'));
+}
+
 export function cleanDigits(val: string | number | undefined | null): string {
   return val ? String(val).replace(/\D/g, '') : '';
 }
@@ -652,6 +738,7 @@ export function parseStudentInfo(row: unknown, index?: number): StudentInfo {
       huongnghiep: String(row[isShiftedYear ? 10 : 9] || '').trim(),
       batdau: String(row[isShiftedYear ? 11 : 10] || '').trim(),
       ketthuc: String(row[isShiftedYear ? 12 : 11] || '').trim(),
+      thongbao: String(row[isShiftedYear ? 13 : 12] || row[13] || row[14] || '').trim(),
       rowNumber,
       isAdmin,
     };
@@ -759,6 +846,7 @@ export function parseStudentInfo(row: unknown, index?: number): StudentInfo {
     huongnghiep: getFieldValue('huongnghiep', ['career', 'nghiep']),
     batdau: getFieldValue('batdau', ['start', 'open', 'thoigianbatdau', 'tgstart']),
     ketthuc: getFieldValue('ketthuc', ['end', 'close', 'thoigianketthuc', 'han', 'tgend']),
+    thongbao: getFieldValue('thongbao', ['Thongbao', 'thong_bao', 'notice', 'announcement']),
     rowNumber,
     isAdmin,
   };
@@ -809,6 +897,7 @@ async function fetchFromNetwork(forceRefresh = false): Promise<StudentInfo[]> {
     if (res.ok) {
       const rawData = await res.json();
       if (Array.isArray(rawData)) {
+        syncGlobalNoticeFromRawRows(rawData);
         const parsed = rawData
           .map((item, idx) => parseStudentInfo(item, idx))
           .filter((s) => s.username || s.hoten || s.sbd);
@@ -852,6 +941,7 @@ async function fetchFromNetwork(forceRefresh = false): Promise<StudentInfo[]> {
       ) {
         const rawData = JSON.parse(text);
         if (Array.isArray(rawData)) {
+          syncGlobalNoticeFromRawRows(rawData);
           const parsed = rawData
             .map((item, idx) => parseStudentInfo(item, idx))
             .filter((s) => s.username || s.hoten || s.sbd);
@@ -1056,5 +1146,5 @@ export function initAutoSync(): void {
 // Prefetch data silently on app initialization & activate auto-sync
 export function prefetchData(): void {
   initAutoSync();
-  getStudentsData().catch(() => {});
+  getStudentsData(true).catch(() => {});
 }
