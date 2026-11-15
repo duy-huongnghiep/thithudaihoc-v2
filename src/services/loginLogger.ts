@@ -80,11 +80,15 @@ export function getLoginLogs(): LoginLogRecord[] {
  * Fetch all login records of Trang tính 2 from server / Google Sheets
  */
 export async function fetchSheet2Logs(): Promise<LoginLogRecord[]> {
+  const scriptUrl = getScriptUrl();
   try {
-    const res = await fetch('/api/sheet2-data', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
+    const res = await fetch(
+      `/api/sheet2-data?url=${encodeURIComponent(scriptUrl)}&_t=${Date.now()}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      }
+    );
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
@@ -97,8 +101,47 @@ export async function fetchSheet2Logs(): Promise<LoginLogRecord[]> {
       }
     }
   } catch {
+    // fallback to direct GAS
+  }
+
+  // Fallback: Direct GAS fetch (for static / GitHub Pages builds)
+  try {
+    const sep = scriptUrl.includes('?') ? '&' : '?';
+    const gasRes = await fetch(`${scriptUrl}${sep}action=get_sheet2&sheet=2&_t=${Date.now()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (gasRes.ok) {
+      const parsed = await gasRes.json();
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const mapped = parsed
+          .map((item: any, idx: number): LoginLogRecord => ({
+            id: `gas_client_log_${idx}`,
+            timestamp: String(item.time || item.timestamp || '').trim(),
+            isoDate: item.isoDate || new Date().toISOString(),
+            hoten: String(item.hoten || '').trim(),
+            sbd: String(item.sbd || '').trim(),
+            username: String(item.username || '').trim(),
+            email: String(item.email || '').trim(),
+            namsinh: String(item.namsinh || '').trim(),
+            monthi: String(item.monthi || '').trim(),
+            device: String(item.device || '').trim(),
+            status: String(item.status || 'Đăng nhập thành công').trim(),
+            synced: true,
+          }))
+          .reverse();
+        try {
+          localStorage.setItem(STORAGE_LOGIN_LOGS_KEY, JSON.stringify(mapped));
+        } catch {
+          // ignore
+        }
+        return mapped;
+      }
+    }
+  } catch {
     // fallback to local
   }
+
   return getLoginLogs();
 }
 
@@ -457,18 +500,76 @@ export async function recordCareerResultToSheet(
   return record;
 }
 
+function parseCareerFromSheet2LogItem(item: any, idx: number): CareerResultRecord | null {
+  const monthi = String(item?.monthi || '').trim();
+  const status = String(item?.status || '').trim();
+  const isCareerRow =
+    (monthi.toLowerCase().includes('hướng nghiệp') && monthi.toLowerCase().includes('mã:')) ||
+    status.startsWith('KQ Hướng nghiệp:') ||
+    status.startsWith('KQ:');
+
+  if (!isCareerRow) return null;
+
+  const codeMatch =
+    monthi.match(/Mã:\s*([RIASEC]{1,6})/i) ||
+    status.match(/KQ(?:\s+Hướng nghiệp)?:\s*([RIASEC]{1,6})/i);
+  const riasecCode = codeMatch ? codeMatch[1].toUpperCase() : '';
+  if (!riasecCode) return null;
+
+  const getScore = (letter: string) => {
+    const m = status.match(new RegExp(`${letter}\\s*:\\s*(\\d+)`, 'i'));
+    return m ? Number(m[1]) : 0;
+  };
+  const scores = {
+    R: getScore('R'),
+    I: getScore('I'),
+    A: getScore('A'),
+    S: getScore('S'),
+    E: getScore('E'),
+    C: getScore('C'),
+  };
+  const scoresText = `R:${scores.R} | I:${scores.I} | A:${scores.A} | S:${scores.S} | E:${scores.E} | C:${scores.C}`;
+  const primaryMatch = status.match(/Nhóm chính:\s*([^|]+)/i);
+  const majorsMatch = status.match(/Ngành:\s*(.+)$/i);
+
+  return {
+    id: `sheet2_client_career_${idx}_${riasecCode}`,
+    timestamp: String(item?.time || item?.timestamp || '').trim(),
+    isoDate: item?.isoDate || new Date().toISOString(),
+    hoten: String(item?.hoten || '').trim(),
+    sbd: String(item?.sbd || '').trim(),
+    username: String(item?.username || '').trim(),
+    email: String(item?.email || '').trim(),
+    namsinh: String(item?.namsinh || '').trim(),
+    riasecCode,
+    primaryTrait: primaryMatch ? primaryMatch[1].trim() : '',
+    secondaryTrait: '',
+    scores,
+    scoresText,
+    recommendedMajors: majorsMatch ? majorsMatch[1].trim() : '',
+    recommendedUniversities: '',
+    examFocus: '',
+    device: String(item?.device || '').trim(),
+    synced: true,
+  };
+}
+
 /**
  * Fetch all career test results from server & Google Sheets
  */
 export async function fetchCareerResults(): Promise<CareerResultRecord[]> {
+  const scriptUrl = getScriptUrl();
   try {
-    const res = await fetch('/api/career-results', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
+    const res = await fetch(
+      `/api/career-results?url=${encodeURIComponent(scriptUrl)}&_t=${Date.now()}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      }
+    );
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && data.length > 0) {
         try {
           localStorage.setItem(STORAGE_CAREER_RESULTS_KEY, JSON.stringify(data));
         } catch {
@@ -478,8 +579,69 @@ export async function fetchCareerResults(): Promise<CareerResultRecord[]> {
       }
     }
   } catch {
-    // fallback
+    // fallback to direct GAS
   }
+
+  // Fallback: Direct GAS fetch (supports both get_career_results and get_sheet2)
+  try {
+    const sep = scriptUrl.includes('?') ? '&' : '?';
+    const [resCareer, resSheet2] = await Promise.all([
+      fetch(`${scriptUrl}${sep}action=get_career_results&_t=${Date.now()}`).catch(() => null),
+      fetch(`${scriptUrl}${sep}action=get_sheet2&sheet=2&_t=${Date.now()}`).catch(() => null),
+    ]);
+
+    const merged: CareerResultRecord[] = [];
+    if (resCareer && resCareer.ok) {
+      const parsed = await resCareer.json().catch(() => []);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((item: any, idx: number) => {
+          if (item?.riasecCode) {
+            merged.push({
+              id: `gas_client_career_${idx}`,
+              timestamp: String(item.time || item.timestamp || '').trim(),
+              isoDate: item.isoDate || new Date().toISOString(),
+              hoten: item.hoten || '',
+              sbd: item.sbd || '',
+              username: item.username || '',
+              email: item.email || '',
+              namsinh: item.namsinh || '',
+              riasecCode: item.riasecCode || '',
+              primaryTrait: item.primaryTrait || '',
+              secondaryTrait: item.secondaryTrait || '',
+              scores: item.scores || { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 },
+              scoresText: item.scoresText || '',
+              recommendedMajors: item.recommendedMajors || '',
+              recommendedUniversities: item.recommendedUniversities || '',
+              examFocus: item.examFocus || '',
+              device: item.device || '',
+              synced: true,
+            });
+          }
+        });
+      }
+    }
+    if (resSheet2 && resSheet2.ok) {
+      const parsed2 = await resSheet2.json().catch(() => []);
+      if (Array.isArray(parsed2)) {
+        parsed2.forEach((row: any, idx: number) => {
+          const c = parseCareerFromSheet2LogItem(row, idx);
+          if (c) merged.push(c);
+        });
+      }
+    }
+    if (merged.length > 0) {
+      const reversed = merged.reverse();
+      try {
+        localStorage.setItem(STORAGE_CAREER_RESULTS_KEY, JSON.stringify(reversed));
+      } catch {
+        // ignore
+      }
+      return reversed;
+    }
+  } catch {
+    // fallback to local
+  }
+
   return getLocalCareerResults();
 }
 

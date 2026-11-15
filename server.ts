@@ -150,6 +150,85 @@ function persistCareerResults(results: any[]): void {
 let inMemoryLogs = loadSavedLogs();
 let inMemoryCareerResults = loadSavedCareerResults();
 
+function parseViTimestampToIso(ts: string): string {
+  if (!ts) return new Date().toISOString();
+  const str = String(ts).trim();
+  // Match HH:mm:ss dd/MM/yyyy or HH:mm dd/MM/yyyy
+  let m = str.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s+(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) {
+    const [, h, min, s = '0', d, mon, y] = m;
+    const utcMs = Date.UTC(Number(y), Number(mon) - 1, Number(d), Number(h) - 7, Number(min), Number(s));
+    if (!isNaN(utcMs)) return new Date(utcMs).toISOString();
+  }
+  // Match dd/MM/yyyy HH:mm:ss or dd/MM/yyyy HH:mm
+  m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (m) {
+    const [, d, mon, y, h, min, s = '0'] = m;
+    const utcMs = Date.UTC(Number(y), Number(mon) - 1, Number(d), Number(h) - 7, Number(min), Number(s));
+    if (!isNaN(utcMs)) return new Date(utcMs).toISOString();
+  }
+  const parsed = new Date(str);
+  return isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function parseCareerFromSheet2Row(item: any, idx: number): any | null {
+  const monthi = String(item?.monthi || '').trim();
+  const status = String(item?.status || '').trim();
+  const isCareerRow =
+    (monthi.toLowerCase().includes('hướng nghiệp') && monthi.toLowerCase().includes('mã:')) ||
+    status.startsWith('KQ Hướng nghiệp:') ||
+    status.startsWith('KQ:');
+
+  if (!isCareerRow) return null;
+
+  const codeMatch =
+    monthi.match(/Mã:\s*([RIASEC]{1,6})/i) ||
+    status.match(/KQ(?:\s+Hướng nghiệp)?:\s*([RIASEC]{1,6})/i);
+  const riasecCode = codeMatch ? codeMatch[1].toUpperCase() : '';
+  if (!riasecCode) return null;
+
+  const getScore = (letter: string) => {
+    const m = status.match(new RegExp(`${letter}\\s*:\\s*(\\d+)`, 'i'));
+    return m ? Number(m[1]) : 0;
+  };
+  const scores = {
+    R: getScore('R'),
+    I: getScore('I'),
+    A: getScore('A'),
+    S: getScore('S'),
+    E: getScore('E'),
+    C: getScore('C'),
+  };
+  const scoresText = `R:${scores.R} | I:${scores.I} | A:${scores.A} | S:${scores.S} | E:${scores.E} | C:${scores.C}`;
+
+  const primaryMatch = status.match(/Nhóm chính:\s*([^|]+)/i);
+  const primaryTrait = primaryMatch ? primaryMatch[1].trim() : '';
+  const majorsMatch = status.match(/Ngành:\s*(.+)$/i);
+  const recommendedMajors = majorsMatch ? majorsMatch[1].trim() : '';
+  const timestamp = String(item?.time || item?.timestamp || '').trim();
+
+  return {
+    id: `sheet2_career_${idx}_${riasecCode}`,
+    timestamp,
+    isoDate: item?.isoDate || parseViTimestampToIso(timestamp),
+    hoten: String(item?.hoten || '').trim(),
+    sbd: String(item?.sbd || '').trim(),
+    username: String(item?.username || '').trim(),
+    email: String(item?.email || '').trim(),
+    namsinh: String(item?.namsinh || '').trim(),
+    riasecCode,
+    primaryTrait,
+    secondaryTrait: '',
+    scores,
+    scoresText,
+    recommendedMajors,
+    recommendedUniversities: '',
+    examFocus: '',
+    device: String(item?.device || '').trim(),
+    synced: true,
+  };
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json());
@@ -320,20 +399,23 @@ async function startServer() {
           if (text.startsWith('[') && !text.includes('<!DOCTYPE')) {
             const parsed = JSON.parse(text);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              sheetLogs = parsed.map((item, idx) => ({
-                id: `gas_log_${idx}_${Date.now()}`,
-                timestamp: item.time || item.timestamp || '',
-                isoDate: item.isoDate || new Date().toISOString(),
-                hoten: item.hoten || '',
-                sbd: item.sbd || '',
-                username: item.username || '',
-                email: item.email || '',
-                namsinh: item.namsinh || '',
-                monthi: item.monthi || '',
-                device: item.device || '',
-                status: item.status || 'Đăng nhập thành công',
-                synced: true,
-              }));
+              sheetLogs = parsed.map((item, idx) => {
+                const ts = String(item.time || item.timestamp || '').trim();
+                return {
+                  id: `gas_log_${idx}`,
+                  timestamp: ts,
+                  isoDate: item.isoDate || parseViTimestampToIso(ts),
+                  hoten: item.hoten || '',
+                  sbd: item.sbd || '',
+                  username: item.username || '',
+                  email: item.email || '',
+                  namsinh: item.namsinh || '',
+                  monthi: item.monthi || '',
+                  device: item.device || '',
+                  status: item.status || 'Đăng nhập thành công',
+                  synced: true,
+                };
+              });
             }
           }
         }
@@ -341,18 +423,26 @@ async function startServer() {
         // Fallback to server's persisted logs
       }
 
-      // Merge server-side logs and remote sheet logs, de-duplicating by timestamp + username
-      const combined = [...sheetLogs, ...inMemoryLogs];
+      // Merge server-side logs and remote sheet logs, de-duplicating by timestamp + sbd/normalized username
+      const combined = [...inMemoryLogs, ...sheetLogs];
       const seen = new Set<string>();
       const uniqueLogs: any[] = [];
 
       for (const item of combined) {
-        const key = `${item.timestamp}_${item.username}_${item.sbd}`;
+        const normUser = String(item.username || '').replace(/^0+/, '');
+        const key = `${item.timestamp}_${normUser}_${item.sbd}_${item.monthi}`;
         if (!seen.has(key)) {
           seen.add(key);
           uniqueLogs.push(item);
         }
       }
+
+      // Sort newest first
+      uniqueLogs.sort((a, b) => {
+        const ta = a.isoDate ? new Date(a.isoDate).getTime() : 0;
+        const tb = b.isoDate ? new Date(b.isoDate).getTime() : 0;
+        return tb - ta;
+      });
 
       return res.json(uniqueLogs);
     } catch (err: unknown) {
@@ -482,7 +572,7 @@ async function startServer() {
     }
   });
 
-  // API route to fetch all career test results (from Google Sheets + local server store)
+  // API route to fetch all career test results (from Google Sheets + Sheet 2 fallback + local server store)
   app.get('/api/career-results', async (req, res) => {
     try {
       const customUrl = (req.query.url as string) || GOOGLE_SCRIPT_URL;
@@ -491,64 +581,117 @@ async function startServer() {
         : GOOGLE_SCRIPT_URL;
 
       let sheetCareerResults: any[] = [];
+      let sheet2CareerResults: any[] = [];
 
-      try {
-        const sep = cleanUrl.includes('?') ? '&' : '?';
-        const targetUrl = `${cleanUrl}${sep}action=get_career_results&_t=${Date.now()}`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3500);
+      const sep = cleanUrl.includes('?') ? '&' : '?';
 
-        const response = await fetch(targetUrl, {
-          method: 'GET',
-          headers: { Accept: 'application/json, text/plain, */*' },
-          signal: controller.signal,
-          redirect: 'follow',
-        });
-        clearTimeout(timeout);
-
-        if (response.ok) {
-          const text = await response.text();
-          if (text.startsWith('[') && !text.includes('<!DOCTYPE')) {
-            const parsed = JSON.parse(text);
-            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].riasecCode !== undefined) {
-              sheetCareerResults = parsed.map((item, idx) => ({
-                id: `gas_career_${idx}_${Date.now()}`,
-                timestamp: item.time || item.timestamp || '',
-                isoDate: item.isoDate || new Date().toISOString(),
-                hoten: item.hoten || '',
-                sbd: item.sbd || '',
-                username: item.username || '',
-                email: item.email || '',
-                namsinh: item.namsinh || '',
-                riasecCode: item.riasecCode || '',
-                primaryTrait: item.primaryTrait || '',
-                secondaryTrait: item.secondaryTrait || '',
-                scores: item.scores || { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 },
-                scoresText: item.scoresText || '',
-                recommendedMajors: item.recommendedMajors || '',
-                recommendedUniversities: item.recommendedUniversities || '',
-                examFocus: item.examFocus || '',
-                device: item.device || '',
-                synced: true,
-              }));
+      // Fetch both get_career_results and get_sheet2 in parallel so career results logged to Trang tính 2 are never missed
+      await Promise.all([
+        (async () => {
+          try {
+            const targetUrl = `${cleanUrl}${sep}action=get_career_results&_t=${Date.now()}`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 4500);
+            const response = await fetch(targetUrl, {
+              method: 'GET',
+              headers: { Accept: 'application/json, text/plain, */*' },
+              signal: controller.signal,
+              redirect: 'follow',
+            });
+            clearTimeout(timeout);
+            if (response.ok) {
+              const text = await response.text();
+              if (text.startsWith('[') && !text.includes('<!DOCTYPE')) {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].riasecCode !== undefined) {
+                  sheetCareerResults = parsed.map((item, idx) => {
+                    const ts = String(item.time || item.timestamp || '').trim();
+                    return {
+                      id: `gas_career_${idx}`,
+                      timestamp: ts,
+                      isoDate: item.isoDate || parseViTimestampToIso(ts),
+                      hoten: item.hoten || '',
+                      sbd: item.sbd || '',
+                      username: item.username || '',
+                      email: item.email || '',
+                      namsinh: item.namsinh || '',
+                      riasecCode: item.riasecCode || '',
+                      primaryTrait: item.primaryTrait || '',
+                      secondaryTrait: item.secondaryTrait || '',
+                      scores: item.scores || { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 },
+                      scoresText: item.scoresText || '',
+                      recommendedMajors: item.recommendedMajors || '',
+                      recommendedUniversities: item.recommendedUniversities || '',
+                      examFocus: item.examFocus || '',
+                      device: item.device || '',
+                      synced: true,
+                    };
+                  });
+                }
+              }
             }
+          } catch {
+            // Fallback to Sheet 2 + server store
           }
-        }
-      } catch {
-        // Fallback to server store
-      }
+        })(),
+        (async () => {
+          try {
+            const targetUrl = `${cleanUrl}${sep}action=get_sheet2&sheet=2&_t=${Date.now()}`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 4500);
+            const response = await fetch(targetUrl, {
+              method: 'GET',
+              headers: { Accept: 'application/json, text/plain, */*' },
+              signal: controller.signal,
+              redirect: 'follow',
+            });
+            clearTimeout(timeout);
+            if (response.ok) {
+              const text = await response.text();
+              if (text.startsWith('[') && !text.includes('<!DOCTYPE')) {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed)) {
+                  sheet2CareerResults = parsed
+                    .map((row, idx) => parseCareerFromSheet2Row(row, idx))
+                    .filter((r): r is NonNullable<typeof r> => Boolean(r));
+                }
+              }
+            }
+          } catch {
+            // Ignore
+          }
+        })(),
+      ]);
 
-      const combined = [...sheetCareerResults, ...inMemoryCareerResults];
+      // Also extract any career rows from inMemoryLogs as extra safety
+      const memoryLogCareers = inMemoryLogs
+        .map((row, idx) => parseCareerFromSheet2Row(row, idx))
+        .filter((r): r is NonNullable<typeof r> => Boolean(r));
+
+      const combined = [
+        ...inMemoryCareerResults,
+        ...sheetCareerResults,
+        ...sheet2CareerResults,
+        ...memoryLogCareers,
+      ];
       const seen = new Set<string>();
       const uniqueResults: any[] = [];
 
       for (const item of combined) {
-        const key = `${item.timestamp}_${item.username}_${item.riasecCode}`;
+        const normUser = String(item.username || '').replace(/^0+/, '');
+        const key = `${item.timestamp}_${normUser || item.sbd}_${item.riasecCode}`;
         if (!seen.has(key)) {
           seen.add(key);
           uniqueResults.push(item);
         }
       }
+
+      // Sort newest first
+      uniqueResults.sort((a, b) => {
+        const ta = a.isoDate ? new Date(a.isoDate).getTime() : 0;
+        const tb = b.isoDate ? new Date(b.isoDate).getTime() : 0;
+        return tb - ta;
+      });
 
       return res.json(uniqueResults);
     } catch (err: unknown) {

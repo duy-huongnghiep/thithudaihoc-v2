@@ -81,7 +81,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const hasHsa = isYes(student.hsa);
   const hasVact = isYes(student.vact);
   const hasThptqg = isYes(student.thptqg);
-  const hasHuongnghiep = isYes(student.huongnghiep);
+  const hasHuongnghiep = isYes(student.huongnghiep) || isAdmin;
   const hasAnyExam = hasHsa || hasVact || hasThptqg;
 
   const handleCopySbd = () => {

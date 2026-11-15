@@ -388,7 +388,11 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
 
         <button
           type="button"
-          onClick={() => setActiveAdminTab('career')}
+          id="btn-tab-admin-career"
+          onClick={() => {
+            setActiveAdminTab('career');
+            loadLogs(true);
+          }}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeAdminTab === 'career'
               ? 'bg-fuchsia-600 text-white shadow-md shadow-fuchsia-600/20'
@@ -473,22 +477,28 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
               </span>
             </div>
 
-            <div className="p-3 bg-[#0c1022] border border-slate-800 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveAdminTab('career');
+                loadLogs(true);
+              }}
+              className="p-3 bg-[#0c1022] hover:bg-fuchsia-950/25 border border-slate-800 hover:border-fuchsia-500/40 rounded-2xl text-left transition cursor-pointer"
+              title="Bấm để xem toàn bộ kết quả trắc nghiệm hướng nghiệp RIASEC"
+            >
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
-                Môn thi quan tâm
+                Bài test Hướng nghiệp
               </span>
-              <div className="text-xs font-semibold text-fuchsia-300 mt-1 flex items-center gap-1.5 flex-wrap">
-                <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px]">
-                  HSA: {stats.hsaCount}
-                </span>
-                <span className="px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 font-mono text-[10px]">
-                  HN: {stats.huongnghiepCount}
+              <div className="text-xl font-bold font-mono text-fuchsia-400 mt-0.5 flex items-center gap-2">
+                <span>{careerResults.length}</span>
+                <span className="text-[10px] font-sans font-semibold text-fuchsia-300 bg-fuchsia-500/15 px-2 py-0.5 rounded-full border border-fuchsia-500/30">
+                  Xem KQ →
                 </span>
               </div>
               <span className="text-[10px] text-slate-500 mt-0.5 block">
-                Số thí sinh đăng ký môn
+                HSA: {stats.hsaCount} • HN ĐK: {stats.huongnghiepCount}
               </span>
-            </div>
+            </button>
           </div>
 
           {/* Dedicated Quick Copy Action Bar ("copy các thông tin cần thiết") */}
