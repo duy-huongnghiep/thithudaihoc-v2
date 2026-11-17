@@ -784,7 +784,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
               <div className="bg-[#080b16] p-4 rounded-2xl border border-slate-800 space-y-3">
                 <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                   <Briefcase className="w-4 h-4 text-emerald-400" />
-                  <span>Ngành học Đại học phù hợp (Tuyển sinh 2026)</span>
+                  <span>Ngành học Đại học phù hợp (Tuyển sinh 2027)</span>
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {[...primaryInfo.majors.slice(0, 3), ...secondaryInfo.majors.slice(0, 2)].map(
