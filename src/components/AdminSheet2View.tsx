@@ -18,7 +18,6 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   Trash2,
-  Sparkles,
   BookOpen,
   Eye,
   ArrowUpDown,
@@ -27,8 +26,9 @@ import {
   ExternalLink,
   Compass,
   Megaphone,
+  Lock,
 } from 'lucide-react';
-import { LoginLogRecord, StudentInfo, CareerResultRecord } from '../types';
+import { LoginLogRecord, StudentInfo, CareerResultRecord, SheetGlobalConfig } from '../types';
 import {
   fetchSheet2Logs,
   fetchCareerResults,
@@ -42,7 +42,19 @@ import {
   clearLoginLogs,
   GOOGLE_APPS_SCRIPT_CODE,
 } from '../services/loginLogger';
-import { getStudentsData, setScriptUrl, getScriptUrl, getGlobalNotice, subscribeGlobalNotice } from '../services/api';
+import {
+  getStudentsData,
+  setScriptUrl,
+  getScriptUrl,
+  getGlobalNotice,
+  subscribeGlobalNotice,
+  getAdminPermissions,
+  getGlobalSheetConfig,
+  subscribeGlobalConfig,
+  parseVietnamDateCutoff,
+  parseVietnamTimestampMs,
+  syncPendingRegistrations,
+} from '../services/api';
 
 interface AdminSheet2ViewProps {
   adminStudent: StudentInfo;
@@ -57,15 +69,62 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
   onOpenCandidateView,
   onOpenGuide,
 }) => {
+  const perms = getAdminPermissions(adminStudent);
+  const isRestricted = perms.hanche;
+  const cutoffDateStr = (perms.danhsachdkytk || '').trim();
+  const cutoffMs = useMemo(() => parseVietnamDateCutoff(cutoffDateStr), [cutoffDateStr]);
+
+  const getInitialTab = (): 'sheet2' | 'career' | 'sheet1' | 'script' | 'none' => {
+    if (perms.lichsu) return 'sheet2';
+    if (perms.ketquahuongnghiep) return 'career';
+    if (perms.danhsachtaikhoan) return 'sheet1';
+    if (perms.cauhinh) return 'script';
+    return 'none';
+  };
+
   const [logs, setLogs] = useState<LoginLogRecord[]>([]);
   const [careerResults, setCareerResults] = useState<CareerResultRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeAdminTab, setActiveAdminTab] = useState<'sheet2' | 'career' | 'sheet1' | 'script'>('sheet2');
+  const [activeAdminTab, setActiveAdminTab] = useState<'sheet2' | 'career' | 'sheet1' | 'script' | 'none'>(
+    getInitialTab
+  );
 
-  // Sheet 1 candidates data & live global notice
+  // Sheet 1 candidates data & live global config/notice
   const [sheet1Students, setSheet1Students] = useState<StudentInfo[]>([]);
   const [globalNotice, setGlobalNotice] = useState<string>(() => getGlobalNotice());
+  const [globalConfig, setGlobalConfig] = useState<SheetGlobalConfig>(() => getGlobalSheetConfig());
+
+  // Masking helpers for restricted viewing mode ("hanche")
+  const maskAccount = (val?: string | null): string => {
+    const s = (val || '').trim();
+    if (!s || s === '---') return '---';
+    if (s.length >= 7) return `${s.slice(0, 3)}***${s.slice(-3)}`;
+    if (s.length >= 3) return `${s.slice(0, 2)}***`;
+    return '***';
+  };
+
+  const maskFullName = (val?: string | null): string => {
+    const s = (val || '').trim();
+    if (!s || s === 'Chưa cập nhật') return 'Chưa cập nhật';
+    const parts = s.split(/\s+/);
+    if (parts.length >= 3) return `${parts[0]} *** ${parts[parts.length - 1]}`;
+    if (parts.length === 2) return `${parts[0]} ***`;
+    return `${s.slice(0, 2)}***`;
+  };
+
+  const maskSbd = (val?: string | null): string => {
+    const s = (val || '').trim();
+    if (!s || s === '---') return '---';
+    return s.length >= 3 ? `***${s.slice(-2)}` : '***';
+  };
+
+  const displayAccount = (val?: string | null) => (isRestricted ? maskAccount(val) : val || '---');
+  const displayName = (val?: string | null) =>
+    isRestricted ? maskFullName(val) : val || 'Chưa cập nhật';
+  const displaySbd = (val?: string | null) => (isRestricted ? maskSbd(val) : val || '---');
+  const displayEmail = (val?: string | null) =>
+    isRestricted ? (val ? '••• (Hạn chế)' : '---') : val || '---';
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,6 +142,29 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
   // Script URL config state
   const [scriptUrlInput, setScriptUrlInput] = useState(() => getScriptUrl());
   const [scriptUrlSaved, setScriptUrlSaved] = useState(false);
+  const [isSyncingReg, setIsSyncingReg] = useState(false);
+  const [confirmClearLogs, setConfirmClearLogs] = useState(false);
+
+  const handleSyncPendingRegistrations = async () => {
+    setIsSyncingReg(true);
+    try {
+      const res = await syncPendingRegistrations();
+      if (res.needsGasUpdate) {
+        triggerCopyFeedback(
+          'Apps Script trên Google Sheet chưa được cập nhật phiên bản mới (thiếu Trang tính 3)!'
+        );
+      } else if (res.syncedCount > 0) {
+        triggerCopyFeedback(
+          `Đã đồng bộ ${res.syncedCount} tài khoản đăng ký Web sang Trang tính 3 (M–X)!`
+        );
+        await loadSheet1();
+      } else {
+        triggerCopyFeedback('Tất cả tài khoản đăng ký Web đã được đồng bộ với Trang tính 3.');
+      }
+    } finally {
+      setIsSyncingReg(false);
+    }
+  };
 
   // Load initial logs from Trang tính 2 & Career Results
   const loadLogs = async (force = false) => {
@@ -115,22 +197,52 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
   useEffect(() => {
     loadLogs();
     loadSheet1();
-    const unsub = subscribeGlobalNotice((notice) => setGlobalNotice(notice));
-    return () => unsub();
+    const unsubNotice = subscribeGlobalNotice((notice) => setGlobalNotice(notice));
+    const unsubCfg = subscribeGlobalConfig((cfg) => setGlobalConfig(cfg));
+    return () => {
+      unsubNotice();
+      unsubCfg();
+    };
   }, []);
+
+  const cutoffLogs = useMemo(() => {
+    if (cutoffMs === null) return logs;
+    return logs.filter((log) => {
+      const ts = parseVietnamTimestampMs(log.timestamp, log.isoDate);
+      return ts !== null && ts >= cutoffMs;
+    });
+  }, [logs, cutoffMs]);
+
+  const cutoffCareerResults = useMemo(() => {
+    if (cutoffMs === null) return careerResults;
+    return careerResults.filter((r) => {
+      const ts = parseVietnamTimestampMs(r.timestamp, r.isoDate);
+      return ts !== null && ts >= cutoffMs;
+    });
+  }, [careerResults, cutoffMs]);
+
+  const visibleSheet1Students = useMemo(() => {
+    if (cutoffMs === null) return sheet1Students;
+    return sheet1Students.filter((st) => {
+      const ts = parseVietnamTimestampMs(st.registeredAt);
+      return ts !== null && ts >= cutoffMs;
+    });
+  }, [sheet1Students, cutoffMs]);
 
   const filteredCareerResults = useMemo(() => {
     const q = careerSearchQuery.trim().toLowerCase();
-    if (!q) return careerResults;
-    return careerResults.filter(
+    if (!q) return cutoffCareerResults;
+    return cutoffCareerResults.filter(
       (r) =>
         (r.hoten || '').toLowerCase().includes(q) ||
         (r.sbd || '').toLowerCase().includes(q) ||
         (r.username || '').toLowerCase().includes(q) ||
+        (r.email || '').toLowerCase().includes(q) ||
+        (r.namsinh || '').toLowerCase().includes(q) ||
         (r.riasecCode || '').toLowerCase().includes(q) ||
         (r.primaryTrait || '').toLowerCase().includes(q)
     );
-  }, [careerResults, careerSearchQuery]);
+  }, [cutoffCareerResults, careerSearchQuery]);
 
   const triggerCopyFeedback = (msg: string) => {
     setCopyFeedback(msg);
@@ -147,12 +259,12 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
     triggerCopyFeedback(`Đã sao chép ${label}!`);
   };
 
-  // Filter & Search Logic
+  // Filter & Search Logic (respects danhsachdkytk cutoff)
   const filteredLogs = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const now = Date.now();
 
-    return logs
+    return cutoffLogs
       .filter((log) => {
         // Search term matching (Name, SBD, Username/Phone, Email)
         if (q) {
@@ -223,20 +335,20 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
         }
         return 0;
       });
-  }, [logs, searchQuery, examFilter, dateFilter, deviceFilter, sortBy]);
+  }, [cutoffLogs, searchQuery, examFilter, dateFilter, deviceFilter, sortBy]);
 
-  // Statistics
+  // Statistics (respects danhsachdkytk cutoff)
   const stats = useMemo(() => {
-    const total = logs.length;
-    const uniqueUsers = new Set(logs.map((l) => l.username || l.sbd).filter(Boolean)).size;
+    const total = cutoffLogs.length;
+    const uniqueUsers = new Set(cutoffLogs.map((l) => l.username || l.sbd).filter(Boolean)).size;
     const todayStr = new Date().toLocaleDateString('vi-VN');
-    const todayCount = logs.filter((l) => l.timestamp?.includes(todayStr)).length;
-    const hsaCount = logs.filter((l) => (l.monthi || '').toLowerCase().includes('hsa')).length;
-    const vactCount = logs.filter((l) => (l.monthi || '').toLowerCase().includes('v-act')).length;
-    const huongnghiepCount = logs.filter((l) => (l.monthi || '').toLowerCase().includes('hướng nghiệp')).length;
+    const todayCount = cutoffLogs.filter((l) => l.timestamp?.includes(todayStr)).length;
+    const hsaCount = cutoffLogs.filter((l) => (l.monthi || '').toLowerCase().includes('hsa')).length;
+    const vactCount = cutoffLogs.filter((l) => (l.monthi || '').toLowerCase().includes('v-act')).length;
+    const huongnghiepCount = cutoffLogs.filter((l) => (l.monthi || '').toLowerCase().includes('hướng nghiệp')).length;
 
     return { total, uniqueUsers, todayCount, hsaCount, vactCount, huongnghiepCount };
-  }, [logs]);
+  }, [cutoffLogs]);
 
   // Handle Bulk Copy Actions
   const handleCopyTable = () => {
@@ -278,11 +390,10 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
   };
 
   const handleClearAllLogs = async () => {
-    if (window.confirm('Bạn có chắc chắn muốn xóa toàn bộ lịch sử đăng nhập đã lưu trên hệ thống?')) {
-      await clearLoginLogs();
-      setLogs([]);
-      triggerCopyFeedback('Đã xóa toàn bộ lịch sử đăng nhập');
-    }
+    await clearLoginLogs();
+    setLogs([]);
+    setConfirmClearLogs(false);
+    triggerCopyFeedback('Đã xóa toàn bộ lịch sử đăng nhập');
   };
 
   return (
@@ -296,24 +407,35 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
       )}
 
       {/* Top Admin Header Bar */}
-      <div className="bg-gradient-to-r from-[#11162d] via-[#161c38] to-[#12162b] border border-indigo-500/30 p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shadow-inner">
-            <ShieldCheck className="w-6 h-6 text-indigo-400" />
+      <div className="bg-[#0c1020] border border-indigo-500/30 p-4 sm:p-5 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3 min-w-0">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-indigo-500/15 border border-indigo-500/35 flex items-center justify-center text-indigo-400 shrink-0">
+            <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wider">
-                Admin A2 - A6
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap text-[11px] font-semibold">
+              <span className="text-amber-400 uppercase tracking-wider font-bold">
+                Quản trị viên
               </span>
-              <span className="text-[11px] text-slate-400">
-                (Tài khoản: <strong className="text-white">{adminStudent.username}</strong>
-                {adminStudent.rowNumber ? ` • Ô Sheet: A${adminStudent.rowNumber}` : ''})
+              {isRestricted && (
+                <>
+                  <span className="text-slate-600">·</span>
+                  <span className="text-rose-300 inline-flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
+                    <span>Chế độ hạn chế</span>
+                  </span>
+                </>
+              )}
+              <span className="text-slate-600">·</span>
+              <span className="text-slate-300">
+                <strong className="text-white">{adminStudent.hoten || adminStudent.username}</strong>
+                {adminStudent.rowNumber ? ` (A${adminStudent.rowNumber})` : ''}
+                {cutoffMs !== null ? ` · Từ ${cutoffDateStr}` : ''}
               </span>
             </div>
-            <h1 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 mt-0.5">
-              <span>Trang Tính 2: Lịch Sử Đăng Nhập Toàn Thể</span>
-            </h1>
+            <h2 className="text-base sm:text-lg font-bold text-white mt-0.5 truncate">
+              Bảng Điều Khiển Quản Trị Hệ Thống
+            </h2>
           </div>
         </div>
 
@@ -322,32 +444,37 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
           <button
             type="button"
             id="btn-admin-refresh-sheet2"
-            onClick={() => loadLogs(true)}
+            onClick={() => {
+              loadLogs(true);
+              loadSheet1();
+            }}
             disabled={isRefreshing}
-            className="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+            className="min-h-[42px] px-3.5 py-2 bg-[#080b16] hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
             title="Tải lại dữ liệu mới nhất từ Google Sheets"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
             <span>{isRefreshing ? 'Đang đồng bộ...' : 'Làm mới'}</span>
           </button>
 
-          <button
-            type="button"
-            id="btn-admin-export-csv"
-            onClick={handleExportCSV}
-            className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
-            title="Tải toàn bộ file Excel/CSV về máy tính"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Xuất Excel/CSV</span>
-          </button>
+          {!isRestricted && perms.lichsu && (
+            <button
+              type="button"
+              id="btn-admin-export-csv"
+              onClick={handleExportCSV}
+              className="min-h-[42px] px-3.5 py-2 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/35 text-emerald-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              title="Tải toàn bộ file Excel/CSV về máy tính"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Xuất CSV</span>
+            </button>
+          )}
 
           {onOpenCandidateView && (
             <button
               type="button"
               id="btn-admin-switch-candidate"
               onClick={onOpenCandidateView}
-              className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              className="min-h-[42px] px-3.5 py-2 bg-blue-600/15 hover:bg-blue-600/25 border border-blue-500/35 text-blue-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
               title="Xem giao diện của thí sinh"
             >
               <Eye className="w-3.5 h-3.5 text-blue-400" />
@@ -359,7 +486,7 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
             type="button"
             id="btn-admin-logout"
             onClick={onLogout}
-            className="px-3 py-2 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
+            className="min-h-[42px] px-3.5 py-2 bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
             title="Đăng xuất khỏi tài khoản admin"
           >
             <LogOut className="w-3.5 h-3.5 text-rose-400" />
@@ -368,228 +495,258 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
         </div>
       </div>
 
-      {/* Main Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => setActiveAdminTab('sheet2')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeAdminTab === 'sheet2'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-              : 'bg-[#0f1325] text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <FileSpreadsheet className="w-3.5 h-3.5" />
-          <span>Lịch sử đăng nhập (Trang tính 2)</span>
-          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/30 font-mono">
-            {logs.length}
-          </span>
-        </button>
+      {/* Main Navigation Tabs (Scrollable single-line on mobile) */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5 overflow-x-auto no-scrollbar">
+        {perms.lichsu && (
+          <button
+            type="button"
+            onClick={() => setActiveAdminTab('sheet2')}
+            className={`min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
+              activeAdminTab === 'sheet2'
+                ? 'bg-blue-600 text-white'
+                : 'bg-[#0c1020] text-slate-400 hover:text-slate-200 border border-slate-800'
+            }`}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+            <span>Lịch sử đăng nhập</span>
+            <span className="font-mono tabular-nums text-[11px] opacity-80">
+              ({cutoffLogs.length})
+            </span>
+          </button>
+        )}
 
-        <button
-          type="button"
-          id="btn-tab-admin-career"
-          onClick={() => {
-            setActiveAdminTab('career');
-            loadLogs(true);
-          }}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeAdminTab === 'career'
-              ? 'bg-fuchsia-600 text-white shadow-md shadow-fuchsia-600/20'
-              : 'bg-[#0f1325] text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <Compass className="w-3.5 h-3.5" />
-          <span>Kết quả Hướng nghiệp</span>
-          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/30 font-mono">
-            {careerResults.length}
-          </span>
-        </button>
+        {perms.ketquahuongnghiep && (
+          <button
+            type="button"
+            id="btn-tab-admin-career"
+            onClick={() => {
+              setActiveAdminTab('career');
+              loadLogs(true);
+            }}
+            className={`min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
+              activeAdminTab === 'career'
+                ? 'bg-fuchsia-600 text-white'
+                : 'bg-[#0c1020] text-slate-400 hover:text-slate-200 border border-slate-800'
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5 shrink-0" />
+            <span>Kết quả Hướng nghiệp</span>
+            <span className="font-mono tabular-nums text-[11px] opacity-80">
+              ({cutoffCareerResults.length})
+            </span>
+          </button>
+        )}
 
-        <button
-          type="button"
-          onClick={() => setActiveAdminTab('sheet1')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeAdminTab === 'sheet1'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-              : 'bg-[#0f1325] text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <Users className="w-3.5 h-3.5" />
-          <span>Danh sách tài khoản (Trang tính 1)</span>
-          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/30 font-mono">
-            {sheet1Students.length}
-          </span>
-        </button>
+        {perms.danhsachtaikhoan && (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveAdminTab('sheet1');
+              loadSheet1();
+            }}
+            className={`min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
+              activeAdminTab === 'sheet1'
+                ? 'bg-blue-600 text-white'
+                : 'bg-[#0c1020] text-slate-400 hover:text-slate-200 border border-slate-800'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5 shrink-0" />
+            <span>Danh sách tài khoản</span>
+            <span className="font-mono tabular-nums text-[11px] opacity-80">
+              ({visibleSheet1Students.length})
+            </span>
+          </button>
+        )}
 
-        <button
-          type="button"
-          onClick={() => setActiveAdminTab('script')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-            activeAdminTab === 'script'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-              : 'bg-[#0f1325] text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          <span>Cấu hình Apps Script</span>
-        </button>
+        {perms.cauhinh && (
+          <button
+            type="button"
+            onClick={() => setActiveAdminTab('script')}
+            className={`min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
+              activeAdminTab === 'script'
+                ? 'bg-blue-600 text-white'
+                : 'bg-[#0c1020] text-slate-400 hover:text-slate-200 border border-slate-800'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5 shrink-0" />
+            <span>Cấu hình Apps Script</span>
+          </button>
+        )}
       </div>
 
+      {/* No Permissions Notice */}
+      {activeAdminTab === 'none' && (
+        <div className="p-8 bg-[#0c1024] border border-amber-500/30 rounded-2xl text-center space-y-2">
+          <Lock className="w-8 h-8 mx-auto text-amber-400 opacity-80" />
+          <h3 className="text-sm font-bold text-white">Chưa được cấp quyền xem dữ liệu</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Tài khoản quản trị viên này hiện chưa có mục nào được ghi <strong>&quot;có&quot;</strong> trên <strong>Trang tính 4</strong>. Vui lòng liên hệ Quản trị viên chính (<strong>A2</strong>) để cấp quyền.
+          </p>
+        </div>
+      )}
+
       {/* TAB 1: Trang tính 2 - Lịch sử đăng nhập toàn thể */}
-      {activeAdminTab === 'sheet2' && (
+      {activeAdminTab === 'sheet2' && perms.lichsu && (
         <div className="space-y-4">
           {/* Quick Statistics KPI Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <div className="p-3 bg-[#0c1022] border border-slate-800 rounded-2xl">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
                 Tổng lượt đăng nhập
               </span>
-              <div className="text-xl font-bold font-mono text-white mt-0.5">
+              <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-white mt-1">
                 {stats.total}
               </div>
-              <span className="text-[10px] text-blue-400 mt-0.5 block">
-                Ghi nhận vào Trang tính 2
+              <span className="text-[11px] text-blue-400 mt-0.5 block">
+                Trang tính 2
               </span>
             </div>
 
-            <div className="p-3 bg-[#0c1022] border border-slate-800 rounded-2xl">
+            <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
                 Thí sinh duy nhất
               </span>
-              <div className="text-xl font-bold font-mono text-emerald-400 mt-0.5">
+              <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-emerald-400 mt-1">
                 {stats.uniqueUsers}
               </div>
-              <span className="text-[10px] text-slate-500 mt-0.5 block">
-                Số người đã vào hệ thống
+              <span className="text-[11px] text-slate-400 mt-0.5 block">
+                Người đã truy cập
               </span>
             </div>
 
-            <div className="p-3 bg-[#0c1022] border border-slate-800 rounded-2xl">
+            <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
                 Đăng nhập hôm nay
               </span>
-              <div className="text-xl font-bold font-mono text-amber-400 mt-0.5">
+              <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-amber-400 mt-1">
                 {stats.todayCount}
               </div>
-              <span className="text-[10px] text-slate-500 mt-0.5 block">
-                Lượt truy cập ngày hôm nay
+              <span className="text-[11px] text-slate-400 mt-0.5 block">
+                Truy cập trong ngày
               </span>
             </div>
 
             <button
               type="button"
               onClick={() => {
-                setActiveAdminTab('career');
-                loadLogs(true);
+                if (perms.ketquahuongnghiep) {
+                  setActiveAdminTab('career');
+                  loadLogs(true);
+                }
               }}
-              className="p-3 bg-[#0c1022] hover:bg-fuchsia-950/25 border border-slate-800 hover:border-fuchsia-500/40 rounded-2xl text-left transition cursor-pointer"
-              title="Bấm để xem toàn bộ kết quả trắc nghiệm hướng nghiệp RIASEC"
+              className={`p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl text-left transition ${
+                perms.ketquahuongnghiep
+                  ? 'hover:bg-fuchsia-950/20 hover:border-fuchsia-500/40 cursor-pointer'
+                  : 'opacity-70 cursor-default'
+              }`}
+              title={
+                perms.ketquahuongnghiep
+                  ? 'Bấm để xem toàn bộ kết quả trắc nghiệm hướng nghiệp RIASEC'
+                  : 'Tài khoản chưa được cấp quyền xem tab Kết quả Hướng nghiệp'
+              }
             >
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
                 Bài test Hướng nghiệp
               </span>
-              <div className="text-xl font-bold font-mono text-fuchsia-400 mt-0.5 flex items-center gap-2">
-                <span>{careerResults.length}</span>
-                <span className="text-[10px] font-sans font-semibold text-fuchsia-300 bg-fuchsia-500/15 px-2 py-0.5 rounded-full border border-fuchsia-500/30">
-                  Xem KQ →
-                </span>
+              <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-fuchsia-400 mt-1 flex items-baseline justify-between gap-2">
+                <span>{perms.ketquahuongnghiep ? cutoffCareerResults.length : '—'}</span>
+                {perms.ketquahuongnghiep && (
+                  <span className="text-[11px] font-sans font-semibold text-fuchsia-300">
+                    Xem KQ →
+                  </span>
+                )}
               </div>
-              <span className="text-[10px] text-slate-500 mt-0.5 block">
-                HSA: {stats.hsaCount} • HN ĐK: {stats.huongnghiepCount}
+              <span className="text-[11px] text-slate-400 mt-0.5 block font-mono tabular-nums">
+                HSA: {stats.hsaCount} · HN: {stats.huongnghiepCount}
               </span>
             </button>
           </div>
 
-          {/* Dedicated Quick Copy Action Bar ("copy các thông tin cần thiết") */}
-          <div className="p-3.5 bg-gradient-to-r from-blue-950/30 via-indigo-950/20 to-purple-950/30 border border-blue-500/30 rounded-2xl space-y-2">
+          {/* Dedicated Quick Copy Action Bar (Hidden in restricted mode) */}
+          {!isRestricted && (
+          <div className="p-3.5 bg-[#0c1020] border border-blue-500/30 rounded-2xl space-y-2.5">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <Copy className="w-3.5 h-3.5 text-blue-400" />
-                <span>Sao chép nhanh thông tin cần thiết (Đã lọc: {filteredLogs.length} bản ghi):</span>
+                <span>Sao chép nhanh ({filteredLogs.length} bản ghi)</span>
               </span>
               <span className="text-[11px] text-slate-400">
-                Bấm nút để copy hàng loạt và dán vào Excel / Zalo / Email
+                Dán trực tiếp vào Excel / Google Sheets
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-              {/* Copy Full Table */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 type="button"
                 id="btn-copy-full-table"
                 onClick={handleCopyTable}
-                className="py-2 px-3 bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-blue-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-[0.98]"
+                className="min-h-[42px] py-2 px-3 bg-blue-600/20 hover:bg-blue-600/35 border border-blue-500/35 text-blue-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                 title="Sao chép toàn bộ bảng dạng Excel/Sheets tab-delimited"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-blue-300" />
+                <FileSpreadsheet className="w-3.5 h-3.5 text-blue-300 shrink-0" />
                 <span>Copy bảng (Excel)</span>
               </button>
 
-              {/* Copy Phone List */}
               <button
                 type="button"
                 id="btn-copy-phones-list"
                 onClick={handleCopyPhones}
-                className="py-2 px-3 bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-emerald-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-[0.98]"
+                className="min-h-[42px] py-2 px-3 bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/35 text-emerald-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                 title="Sao chép danh sách số điện thoại phân cách bởi dấu phẩy"
               >
-                <Phone className="w-3.5 h-3.5 text-emerald-300" />
-                <span>Copy DS Số ĐT</span>
+                <Phone className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                <span>Copy DS SĐT</span>
               </button>
 
-              {/* Copy Email List */}
               <button
                 type="button"
                 id="btn-copy-emails-list"
                 onClick={handleCopyEmails}
-                className="py-2 px-3 bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-[0.98]"
+                className="min-h-[42px] py-2 px-3 bg-purple-600/20 hover:bg-purple-600/35 border border-purple-500/35 text-purple-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                 title="Sao chép danh sách email gửi thông báo ca thi"
               >
-                <Mail className="w-3.5 h-3.5 text-purple-300" />
+                <Mail className="w-3.5 h-3.5 text-purple-300 shrink-0" />
                 <span>Copy DS Email</span>
               </button>
 
-              {/* Copy SBD List */}
               <button
                 type="button"
                 id="btn-copy-sbds-list"
                 onClick={handleCopySbds}
-                className="py-2 px-3 bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/40 text-amber-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-[0.98]"
+                className="min-h-[42px] py-2 px-3 bg-amber-600/20 hover:bg-amber-600/35 border border-amber-500/35 text-amber-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                 title="Sao chép danh sách Số Báo Danh (SBD)"
               >
-                <Users className="w-3.5 h-3.5 text-amber-300" />
+                <Users className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                 <span>Copy DS SBD</span>
               </button>
             </div>
           </div>
+          )}
 
-          {/* Comprehensive Filter Bar ("có cả bộ lọc") */}
-          <div className="p-3.5 bg-[#0e1224] border border-slate-800 rounded-2xl space-y-3">
+          {/* Comprehensive Filter Bar */}
+          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-3">
             <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
-              {/* Search Bar */}
               <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   id="input-filter-search-sheet2"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Tìm theo Tên thí sinh, Số báo danh, SĐT/Tài khoản, Email..."
-                  className="w-full pl-9 pr-3 py-2 bg-[#080b17] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-blue-500 transition"
+                  placeholder="Tìm theo Tên, SBD, SĐT/Tài khoản, Email..."
+                  className="w-full min-h-[42px] pl-10 pr-8 py-2 bg-[#080b16] border border-slate-700/80 rounded-xl text-base sm:text-xs text-white placeholder-slate-500 outline-none focus:border-blue-500 transition"
                 />
                 {searchQuery && (
                   <button
                     type="button"
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs p-1 cursor-pointer"
                   >
                     ✕
                   </button>
                 )}
               </div>
 
-              {/* Reset Filter Button */}
               {(searchQuery || examFilter !== 'all' || dateFilter !== 'all' || deviceFilter !== 'all' || sortBy !== 'newest') && (
                 <button
                   type="button"
@@ -601,25 +758,23 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                     setDeviceFilter('all');
                     setSortBy('newest');
                   }}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition"
+                  className="min-h-[42px] px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition"
                 >
                   Đặt lại lọc
                 </button>
               )}
             </div>
 
-            {/* Filter Pills row */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-1 text-xs">
-              {/* Exam filter */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
               <div>
                 <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-                  Môn thi đã đăng ký:
+                  Môn thi đã đăng ký
                 </label>
                 <select
                   id="select-filter-exam"
                   value={examFilter}
                   onChange={(e) => setExamFilter(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-[#080b17] border border-slate-700 rounded-xl text-xs text-slate-200 outline-none focus:border-blue-500"
+                  className="w-full min-h-[40px] px-2.5 py-1.5 bg-[#080b16] border border-slate-700 rounded-xl text-base sm:text-xs text-slate-200 outline-none focus:border-blue-500"
                 >
                   <option value="all">Tất cả môn thi</option>
                   <option value="hsa">ĐGNL HSA (ĐHQGHN)</option>
@@ -630,16 +785,15 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                 </select>
               </div>
 
-              {/* Time filter */}
               <div>
                 <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-                  Thời gian đăng nhập:
+                  Thời gian đăng nhập
                 </label>
                 <select
                   id="select-filter-date"
                   value={dateFilter}
                   onChange={(e) => setDateFilter(e.target.value as any)}
-                  className="w-full px-2.5 py-1.5 bg-[#080b17] border border-slate-700 rounded-xl text-xs text-slate-200 outline-none focus:border-blue-500"
+                  className="w-full min-h-[40px] px-2.5 py-1.5 bg-[#080b16] border border-slate-700 rounded-xl text-base sm:text-xs text-slate-200 outline-none focus:border-blue-500"
                 >
                   <option value="all">Tất cả thời gian</option>
                   <option value="today">Hôm nay</option>
@@ -648,16 +802,15 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                 </select>
               </div>
 
-              {/* Device filter */}
               <div>
                 <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-                  Thiết bị truy cập:
+                  Thiết bị truy cập
                 </label>
                 <select
                   id="select-filter-device"
                   value={deviceFilter}
                   onChange={(e) => setDeviceFilter(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-[#080b17] border border-slate-700 rounded-xl text-xs text-slate-200 outline-none focus:border-blue-500"
+                  className="w-full min-h-[40px] px-2.5 py-1.5 bg-[#080b16] border border-slate-700 rounded-xl text-base sm:text-xs text-slate-200 outline-none focus:border-blue-500"
                 >
                   <option value="all">Tất cả thiết bị</option>
                   <option value="windows">Windows</option>
@@ -667,16 +820,15 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                 </select>
               </div>
 
-              {/* Sorting */}
               <div>
                 <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-                  Sắp xếp hiển thị:
+                  Sắp xếp hiển thị
                 </label>
                 <select
                   id="select-sort-by"
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as any)}
-                  className="w-full px-2.5 py-1.5 bg-[#080b17] border border-slate-700 rounded-xl text-xs text-slate-200 outline-none focus:border-blue-500"
+                  className="w-full min-h-[40px] px-2.5 py-1.5 bg-[#080b16] border border-slate-700 rounded-xl text-base sm:text-xs text-slate-200 outline-none focus:border-blue-500"
                 >
                   <option value="newest">Mới nhất trước</option>
                   <option value="oldest">Cũ nhất trước</option>
@@ -688,20 +840,45 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
             </div>
           </div>
 
-          {/* Table Result Header */}
-          <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+          {/* Table Result Header with Safe Inline Delete Confirmation */}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 px-1">
             <span>
-              Đang hiển thị: <strong className="text-white">{filteredLogs.length}</strong> / {logs.length} bản ghi đăng nhập của Trang tính 2
+              Đang hiển thị: <strong className="text-white tabular-nums">{filteredLogs.length}</strong> /{' '}
+              <span className="tabular-nums">{cutoffLogs.length}</span> bản ghi
+              {isRestricted && (
+                <span className="ml-2 text-rose-300">(Chế độ ẩn bớt thông tin cá nhân)</span>
+              )}
             </span>
-            {logs.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClearAllLogs}
-                className="text-[11px] text-rose-400 hover:text-rose-300 transition flex items-center gap-1 cursor-pointer"
-              >
-                <Trash2 className="w-3 h-3" />
-                <span>Xóa lịch sử</span>
-              </button>
+            {logs.length > 0 && !isRestricted && perms.cauhinh && (
+              <div className="flex items-center gap-2">
+                {confirmClearLogs ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleClearAllLogs}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-bold transition cursor-pointer"
+                    >
+                      Xác nhận xóa tất cả
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearLogs(false)}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearLogs(true)}
+                    className="text-[11px] text-rose-400 hover:text-rose-300 transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xóa lịch sử</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -721,7 +898,7 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                     <th className="py-3 px-3 min-w-[160px]">Môn thi đã đăng ký</th>
                     <th className="py-3 px-3 min-w-[130px]">Thiết bị</th>
                     <th className="py-3 px-3 min-w-[120px]">Trạng thái</th>
-                    <th className="py-3 px-3 w-20 text-center">Copy</th>
+                    {!isRestricted && <th className="py-3 px-3 w-20 text-center">Copy</th>}
                   </tr>
                 </thead>
 
@@ -762,27 +939,29 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                           {/* Họ và tên */}
                           <td className="py-2.5 px-3 font-semibold text-white">
                             <div className="flex items-center justify-between gap-1">
-                              <span>{log.hoten || 'Chưa cập nhật'}</span>
-                              <button
-                                type="button"
-                                onClick={() => copyToClipboard(log.hoten, 'Họ tên', `name_${index}`)}
-                                className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-blue-400 transition"
-                                title="Sao chép họ tên"
-                              >
-                                {copiedCellId === `name_${index}` ? (
-                                  <Check className="w-3 h-3 text-emerald-400" />
-                                ) : (
-                                  <Copy className="w-3 h-3" />
-                                )}
-                              </button>
+                              <span>{displayName(log.hoten)}</span>
+                              {!isRestricted && (
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(log.hoten, 'Họ tên', `name_${index}`)}
+                                  className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-blue-400 transition"
+                                  title="Sao chép họ tên"
+                                >
+                                  {copiedCellId === `name_${index}` ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              )}
                             </div>
                           </td>
 
                           {/* SBD */}
                           <td className="py-2.5 px-3 font-mono font-bold text-blue-400 whitespace-nowrap">
                             <div className="flex items-center justify-between gap-1">
-                              <span>{log.sbd || '---'}</span>
-                              {log.sbd && log.sbd !== '---' && (
+                              <span>{displaySbd(log.sbd)}</span>
+                              {!isRestricted && log.sbd && log.sbd !== '---' && (
                                 <button
                                   type="button"
                                   onClick={() => copyToClipboard(log.sbd, 'SBD', `sbd_${index}`)}
@@ -802,8 +981,8 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                           {/* Tài khoản / SĐT */}
                           <td className="py-2.5 px-3 font-mono text-slate-300 whitespace-nowrap">
                             <div className="flex items-center justify-between gap-1">
-                              <span>{log.username || '---'}</span>
-                              {log.username && (
+                              <span>{displayAccount(log.username)}</span>
+                              {!isRestricted && log.username && (
                                 <button
                                   type="button"
                                   onClick={() => copyToClipboard(log.username, 'Tài khoản/SĐT', `user_${index}`)}
@@ -822,16 +1001,16 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
 
                           {/* Năm sinh */}
                           <td className="py-2.5 px-3 text-slate-400 font-mono text-[11px]">
-                            {log.namsinh || '---'}
+                            {isRestricted ? '***' : log.namsinh || '---'}
                           </td>
 
                           {/* Email */}
                           <td className="py-2.5 px-3 text-slate-300 text-[11px]">
                             <div className="flex items-center justify-between gap-1">
-                              <span className="truncate max-w-[170px]" title={log.email}>
-                                {log.email || '---'}
+                              <span className="truncate max-w-[170px]" title={isRestricted ? '' : log.email}>
+                                {displayEmail(log.email)}
                               </span>
-                              {log.email && (
+                              {!isRestricted && log.email && (
                                 <button
                                   type="button"
                                   onClick={() => copyToClipboard(log.email || '', 'Email', `mail_${index}`)}
@@ -897,30 +1076,32 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
 
                           {/* Trạng thái */}
                           <td className="py-2.5 px-3 whitespace-nowrap">
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 w-max">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-300">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
                               <span>{log.status || 'Thành công'}</span>
                             </span>
                           </td>
 
                           {/* Action Copy Row */}
-                          <td className="py-2.5 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const rowText = `${log.timestamp}\t${log.hoten}\t${log.sbd}\t${log.username}\t${log.namsinh}\t${log.email}\t${log.monthi}\t${log.device}\t${log.status}`;
-                                copyToClipboard(rowText, 'toàn bộ dòng', `row_${index}`);
-                              }}
-                              className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-blue-400 transition cursor-pointer"
-                              title="Sao chép toàn bộ hàng dữ liệu này"
-                            >
-                              {copiedCellId === `row_${index}` ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </td>
+                          {!isRestricted && (
+                            <td className="py-2.5 px-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const rowText = `${log.timestamp}\t${log.hoten}\t${log.sbd}\t${log.username}\t${log.namsinh}\t${log.email}\t${log.monthi}\t${log.device}\t${log.status}`;
+                                  copyToClipboard(rowText, 'toàn bộ dòng', `row_${index}`);
+                                }}
+                                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-blue-400 transition cursor-pointer"
+                                title="Sao chép toàn bộ hàng dữ liệu này"
+                              >
+                                {copiedCellId === `row_${index}` ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -932,54 +1113,56 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
         </div>
       )}
 
-      {/* TAB CAREER: Kết quả Hướng nghiệp (RIASEC) đã lưu về Google Sheet */}
-      {activeAdminTab === 'career' && (
+      {/* TAB CAREER: Thông tin & Kết quả Hướng nghiệp (Trang tính 5) */}
+      {activeAdminTab === 'career' && perms.ketquahuongnghiep && (
         <div className="space-y-4">
           <div className="p-3.5 bg-[#0e1224] border border-fuchsia-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <div>
               <h3 className="font-bold text-white text-sm flex items-center gap-2">
                 <Compass className="w-4 h-4 text-fuchsia-400" />
-                <span>Kết Quả Trắc Nghiệm Hướng Nghiệp (RIASEC)</span>
+                <span>Thông Tin &amp; Kết Quả Hướng Nghiệp RIASEC (Trang tính 5)</span>
               </h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Thí sinh làm bài trực tiếp trên web và kết quả tự động lưu về Google Sheet.
+                Thí sinh nhập thông tin &amp; làm bài trực tiếp ngoài trang chủ hoặc trong phòng thi — dữ liệu tự động lưu vào <strong>Trang tính 5</strong>.
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  if (copyCareerResultsAsTSV(filteredCareerResults)) {
-                    triggerCopyFeedback('Đã sao chép bảng kết quả hướng nghiệp (Dán Ctrl+V vào Google Sheet)!');
-                  }
-                }}
-                className="px-3 py-2 bg-fuchsia-600/30 hover:bg-fuchsia-600/50 border border-fuchsia-500/40 text-fuchsia-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy bảng (Sheets/Excel)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  exportCareerResultsToCSV(filteredCareerResults);
-                  triggerCopyFeedback('Đang tải file CSV kết quả hướng nghiệp...');
-                }}
-                className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Xuất CSV</span>
-              </button>
-            </div>
+            {!isRestricted && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (copyCareerResultsAsTSV(filteredCareerResults)) {
+                      triggerCopyFeedback('Đã sao chép bảng kết quả hướng nghiệp (Dán Ctrl+V vào Google Sheet)!');
+                    }
+                  }}
+                  className="px-3 py-2 bg-fuchsia-600/30 hover:bg-fuchsia-600/50 border border-fuchsia-500/40 text-fuchsia-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy bảng (Sheets/Excel)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportCareerResultsToCSV(filteredCareerResults);
+                    triggerCopyFeedback('Đang tải file CSV kết quả hướng nghiệp...');
+                  }}
+                  className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Xuất CSV</span>
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={careerSearchQuery}
               onChange={(e) => setCareerSearchQuery(e.target.value)}
-              placeholder="Tìm theo Tên thí sinh, SBD, SĐT, Mã RIASEC (VD: RIA)..."
-              className="w-full pl-9 pr-3 py-2 bg-[#080b17] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-fuchsia-500 transition"
+              placeholder="Tìm theo Tên thí sinh, SĐT, Email, Năm sinh, SBD, Mã RIASEC (VD: RIA)..."
+              className="w-full min-h-[42px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 rounded-xl text-base sm:text-xs text-white placeholder-slate-500 outline-none focus:border-fuchsia-500 transition"
             />
           </div>
 
@@ -991,22 +1174,26 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                     <th className="py-3 px-3 w-12 text-center">STT</th>
                     <th className="py-3 px-3 min-w-[140px]">Thời gian</th>
                     <th className="py-3 px-3 min-w-[150px]">Họ và tên</th>
+                    <th className="py-3 px-3 min-w-[110px]">SĐT / Tài khoản</th>
+                    <th className="py-3 px-3 min-w-[80px]">Năm sinh</th>
+                    <th className="py-3 px-3 min-w-[160px]">Email</th>
                     <th className="py-3 px-3 min-w-[80px]">SBD</th>
-                    <th className="py-3 px-3 min-w-[110px]">Tài khoản</th>
                     <th className="py-3 px-3 min-w-[90px]">Mã RIASEC</th>
                     <th className="py-3 px-3 min-w-[160px]">Nhóm tính cách chính</th>
                     <th className="py-3 px-3 min-w-[180px]">Điểm chi tiết</th>
                     <th className="py-3 px-3 min-w-[220px]">Ngành học đề xuất</th>
+                    <th className="py-3 px-3 min-w-[200px]">Khối thi tập trung</th>
+                    <th className="py-3 px-3 min-w-[130px]">Thiết bị</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
                   {filteredCareerResults.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-12 text-center text-slate-500">
+                      <td colSpan={13} className="py-12 text-center text-slate-500">
                         <Compass className="w-8 h-8 mx-auto mb-2 opacity-40 text-fuchsia-400" />
                         <p className="font-semibold text-slate-400">Chưa có kết quả trắc nghiệm hướng nghiệp nào</p>
                         <p className="text-[11px] text-slate-600 mt-0.5">
-                          Khi thí sinh hoàn thành bài test trực tiếp trên web, kết quả sẽ tự động hiển thị tại đây và lưu về Google Sheet.
+                          Khi thí sinh hoàn thành bài test trực tiếp trên web, thông tin và kết quả sẽ tự động hiển thị tại đây và lưu về Trang tính 5.
                         </p>
                       </td>
                     </tr>
@@ -1019,17 +1206,23 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                         <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
                           {res.timestamp || '---'}
                         </td>
-                        <td className="py-2.5 px-3 font-semibold text-white">
-                          {res.hoten || 'Chưa cập nhật'}
+                        <td className="py-2.5 px-3 font-semibold text-white whitespace-nowrap">
+                          {displayName(res.hoten)}
                         </td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-blue-400">
-                          {res.sbd || '---'}
+                        <td className="py-2.5 px-3 font-mono tabular-nums text-emerald-300 font-semibold whitespace-nowrap">
+                          {displayAccount(res.username)}
                         </td>
-                        <td className="py-2.5 px-3 font-mono text-slate-300">
-                          {res.username || '---'}
+                        <td className="py-2.5 px-3 font-mono tabular-nums text-slate-300">
+                          {res.namsinh || '---'}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300 text-[11px]">
+                          {displayEmail(res.email)}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-blue-400 whitespace-nowrap">
+                          {displaySbd(res.sbd)}
                         </td>
                         <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40">
+                          <span className="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-fuchsia-500/15 text-fuchsia-300">
                             {res.riasecCode || '---'}
                           </span>
                         </td>
@@ -1042,6 +1235,12 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                         <td className="py-2.5 px-3 text-slate-300 text-[11px]">
                           {res.recommendedMajors || '---'}
                         </td>
+                        <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                          {res.examFocus || '---'}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-400 text-[11px] whitespace-nowrap">
+                          {res.device || '---'}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1052,23 +1251,57 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: Trang tính 1 - Danh sách tài khoản (Trang tính 1 của Google Sheet) */}
-      {activeAdminTab === 'sheet1' && (
+      {/* TAB 2: Danh sách tài khoản (Trang tính 3 A-K & M-X + Trang tính 1) */}
+      {activeAdminTab === 'sheet1' && perms.danhsachtaikhoan && (
         <div className="space-y-3">
           <div className="p-3.5 bg-[#0e1224] border border-slate-800 rounded-2xl flex items-center justify-between flex-wrap gap-2 text-xs">
             <div>
               <h3 className="font-bold text-white text-sm flex items-center gap-2">
                 <Users className="w-4 h-4 text-blue-400" />
-                <span>Trang Tính 1: Danh Sách Tài Khoản & Ca Thi</span>
+                <span>Danh Sách Tài Khoản &amp; Đăng Ký (Trang tính 3 &amp; 1)</span>
               </h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Các ô từ <strong>A2 đến A6</strong> được cấp quyền <strong>Admin</strong>. Thí sinh bắt đầu từ hàng A8.
+                Bao gồm tài khoản nhập tay (<strong>Trang tính 3: A–K</strong>), đăng ký trực tiếp trên Web (<strong>Trang tính 3: M–X</strong>) và Trang tính 1.
+                {cutoffMs !== null && (
+                  <span className="text-amber-300 font-semibold">
+                    {' '}· Đang lọc từ {cutoffDateStr} trở về sau.
+                  </span>
+                )}
               </p>
             </div>
-            <span className="text-xs text-blue-400 font-mono font-bold">
-              Tổng cộng: {sheet1Students.length} tài khoản
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              {!isRestricted && (
+                <button
+                  type="button"
+                  id="btn-sync-web-registrations"
+                  onClick={handleSyncPendingRegistrations}
+                  disabled={isSyncingReg}
+                  className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded-xl font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  title="Đẩy các tài khoản đăng ký trên web chưa đồng bộ vào Trang tính 3 (M–X)"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingReg ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingReg ? 'Đang đồng bộ...' : 'Đồng bộ Web → Trang tính 3'}</span>
+                </button>
+              )}
+              <span className="text-xs text-blue-400 font-mono tabular-nums font-bold">
+                Tổng cộng: {visibleSheet1Students.length} tài khoản
+              </span>
+            </div>
           </div>
+
+          {!globalConfig.registrationConfig && (
+            <div className="p-3 rounded-xl bg-amber-950/35 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span className="font-bold block text-amber-300">
+                  Apps Script trên Google Sheet đang chạy phiên bản cũ (chưa hỗ trợ ghi Trang tính 3 M–X)
+                </span>
+                <p className="text-[11px] text-amber-100/90 leading-relaxed">
+                  Vui lòng vào tab <strong>Cấu hình Apps Script</strong>, sao chép toàn bộ mã mới nhất dán vào Google Apps Script và chọn <strong>Triển khai → Quản lý các bản triển khai → Chỉnh sửa → Phiên bản mới → Triển khai</strong>. Sau đó bấm nút <strong>Đồng bộ Web → Trang tính 3</strong> ở trên để đẩy các tài khoản đã đăng ký sang cột M–X.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div
             className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
@@ -1080,7 +1313,7 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
             <Megaphone className={`w-4 h-4 shrink-0 mt-0.5 ${globalNotice ? 'text-amber-400' : 'text-slate-500'}`} />
             <div className="min-w-0 flex-1">
               <span className="font-bold block text-[11px] uppercase tracking-wider mb-0.5">
-                Trạng thái mục &quot;Thongbao&quot; (Cột M–O trên Google Sheet):
+                Trạng thái mục &quot;Thongbao&quot; (QTV A2 trên Trang tính 4):
               </span>
               {globalNotice ? (
                 <p className="text-amber-100 whitespace-pre-line leading-relaxed">{globalNotice}</p>
@@ -1093,81 +1326,96 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
           </div>
 
           <div className="border border-slate-800 rounded-2xl overflow-hidden bg-[#0a0d1c] shadow-lg">
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-[#12162e] text-slate-300 font-bold uppercase text-[10px] tracking-wider sticky top-0 z-20 border-b border-slate-700">
                   <tr>
-                    <th className="py-3 px-3 w-14 text-center">Ô Sheet</th>
+                    <th className="py-3 px-3 min-w-[95px]">Nguồn / Dòng</th>
+                    <th className="py-3 px-3 min-w-[140px]">Thời gian đăng ký</th>
                     <th className="py-3 px-3">Tài khoản</th>
                     <th className="py-3 px-3">Mật khẩu</th>
                     <th className="py-3 px-3">SBD</th>
-                    <th className="py-3 px-3">Họ và tên</th>
+                    <th className="py-3 px-3 min-w-[140px]">Họ và tên</th>
                     <th className="py-3 px-3">Email</th>
-                    <th className="py-3 px-3">Vai trò</th>
+                    <th className="py-3 px-3">Năm sinh</th>
                     <th className="py-3 px-3">HSA</th>
                     <th className="py-3 px-3">V-ACT</th>
+                    <th className="py-3 px-3">THPTQG</th>
                     <th className="py-3 px-3">Hướng nghiệp</th>
-                    <th className="py-3 px-3">Bắt đầu / Kết thúc</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {sheet1Students.map((st, i) => {
-                    const rowNum = st.rowNumber ?? i + 2;
-                    const isAdmin = st.isAdmin || (rowNum >= 2 && rowNum <= 6);
+                  {visibleSheet1Students.length === 0 ? (
+                    <tr>
+                      <td colSpan={12} className="py-12 text-center text-slate-500">
+                        <Users className="w-8 h-8 mx-auto mb-2 opacity-40 text-blue-400" />
+                        <p className="font-semibold text-slate-400">
+                          {cutoffMs !== null
+                            ? `Không có tài khoản đăng ký nào từ ${cutoffDateStr} trở về sau`
+                            : 'Chưa có dữ liệu tài khoản nào'}
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleSheet1Students.map((st, i) => {
+                      const rowNum = st.rowNumber ?? i + 2;
+                      const isAdmin = st.isAdmin || false;
+                      const zoneLabel =
+                        st.sourceZone === 'sheet3_web'
+                          ? `Web M–X · ${rowNum}`
+                          : st.sourceZone === 'sheet3_manual'
+                          ? `Tay A–K · ${rowNum}`
+                          : `Sheet 1 · ${rowNum}`;
 
-                    return (
-                      <tr
-                        key={i}
-                        className={`hover:bg-[#131835]/70 transition-colors ${
-                          isAdmin ? 'bg-indigo-950/20' : ''
-                        }`}
-                      >
-                        <td className="py-2.5 px-3 text-center font-mono font-bold text-[11px]">
-                          <span
-                            className={`px-1.5 py-0.5 rounded ${
-                              isAdmin
-                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                : 'text-slate-400'
-                            }`}
-                          >
-                            A{rowNum}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 font-mono font-semibold text-white">
-                          {st.username || '---'}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-slate-400">
-                          {st.password ? '••••••••' : '---'}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-blue-400 font-bold">
-                          {st.sbd || '---'}
-                        </td>
-                        <td className="py-2.5 px-3 font-semibold text-slate-200">
-                          {st.hoten || '---'}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-400 text-[11px]">
-                          {st.email || '---'}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          {isAdmin ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                              ADMIN
+                      return (
+                        <tr
+                          key={`${st.username}_${st.sbd}_${i}`}
+                          className={`hover:bg-[#131835]/70 transition-colors ${
+                            isAdmin ? 'bg-indigo-950/20' : ''
+                          }`}
+                        >
+                          <td className="py-2.5 px-3 font-mono tabular-nums text-[11px] whitespace-nowrap">
+                            <span
+                              className={
+                                isAdmin
+                                  ? 'text-amber-300 font-bold'
+                                  : st.sourceZone === 'sheet3_web'
+                                  ? 'text-emerald-300 font-semibold'
+                                  : 'text-slate-400'
+                              }
+                            >
+                              {zoneLabel}
                             </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">
-                              Thí sinh
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-300 text-[11px]">{st.hsa || '---'}</td>
-                        <td className="py-2.5 px-3 text-slate-300 text-[11px]">{st.vact || '---'}</td>
-                        <td className="py-2.5 px-3 text-slate-300 text-[11px]">{st.huongnghiep || '---'}</td>
-                        <td className="py-2.5 px-3 font-mono text-[10px] text-slate-400">
-                          {st.batdau || '0'} / {st.ketthuc || '0'}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono tabular-nums text-[11px] text-slate-300 whitespace-nowrap">
+                            {st.registeredAt || '---'}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono tabular-nums font-semibold text-white">
+                            {displayAccount(st.username)}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-400">
+                            {st.password ? '••••••••' : '---'}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono tabular-nums text-blue-400 font-bold">
+                            {displaySbd(st.sbd)}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-200">
+                            {displayName(st.hoten)}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                            {displayEmail(st.email)}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono tabular-nums text-slate-300 text-[11px]">
+                            {st.namsinh || '---'}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300 text-[11px]">{st.hsa || '---'}</td>
+                          <td className="py-2.5 px-3 text-slate-300 text-[11px]">{st.vact || '---'}</td>
+                          <td className="py-2.5 px-3 text-slate-300 text-[11px]">{st.thptqg || '---'}</td>
+                          <td className="py-2.5 px-3 text-slate-300 text-[11px]">{st.huongnghiep || '---'}</td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1175,31 +1423,102 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
         </div>
       )}
 
-      {/* TAB 3: Cấu hình Apps Script */}
-      {activeAdminTab === 'script' && (
+      {/* TAB 3: Cấu hình Apps Script & Trạng thái Trang tính 4 */}
+      {activeAdminTab === 'script' && perms.cauhinh && (
         <div className="p-4 bg-[#0c1024] border border-slate-800 rounded-2xl space-y-4 text-xs">
+          {/* Live Trang tính 4 (QTV A2) Status Overview */}
+          <div className="p-3.5 bg-[#080b17] border border-indigo-500/30 rounded-xl space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="font-bold text-indigo-300 text-xs">
+                Trạng thái cấu hình từ QTV A2 (Trang tính 4):
+              </span>
+              <span
+                className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                  globalConfig.loadedFromSheet4
+                    ? 'bg-emerald-500/15 text-emerald-300'
+                    : 'bg-amber-500/15 text-amber-300'
+                }`}
+              >
+                {globalConfig.loadedFromSheet4
+                  ? '✓ Đã kết nối Trang tính 4'
+                  : 'Chưa kết nối Trang tính 4 — hãy cập nhật Apps Script bên dưới'}
+              </span>
+            </div>
+            {globalConfig.loadedFromSheet4 && (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 text-[11px]">
+                <div className="p-2 rounded-lg bg-[#0d1124] border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Mở kỳ thi (A2):</span>
+                  <span className="font-mono font-bold text-white">
+                    {[
+                      globalConfig.enableHsa && 'HSA',
+                      globalConfig.enableVact && 'VACT',
+                      globalConfig.enableThptqg && 'THPTQG',
+                      globalConfig.enableHuongnghiep && 'HN',
+                    ]
+                      .filter(Boolean)
+                      .join(', ') || 'Tắt tất cả'}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#0d1124] border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Mở Đăng ký Web:</span>
+                  <span className="font-mono font-bold text-amber-300">
+                    {[
+                      globalConfig.registrationConfig?.enableHsa && 'HSA',
+                      globalConfig.registrationConfig?.enableVact && 'VACT',
+                      globalConfig.registrationConfig?.enableThptqg && 'THPTQG',
+                      globalConfig.registrationConfig?.enableHuongnghiep && 'HN',
+                    ]
+                      .filter(Boolean)
+                      .join(', ') || 'Đóng tất cả'}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#0d1124] border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Bắt đầu / Kết thúc (A2):</span>
+                  <span className="font-mono tabular-nums text-amber-300">
+                    {globalConfig.batdau || '0'} → {globalConfig.ketthuc || '0'}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#0d1124] border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Thông báo (A2):</span>
+                  <span className="text-slate-200 truncate block">
+                    {globalConfig.thongbao ? 'Đang bật' : 'Trống'}
+                  </span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#0d1124] border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Link bài thi (Sheet 4):</span>
+                  <span className="font-mono tabular-nums font-bold text-emerald-300">
+                    {Object.keys(globalConfig.examLinks || {}).length} link tùy chỉnh
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div>
             <h3 className="font-bold text-white text-sm flex items-center gap-2">
               <FileText className="w-4 h-4 text-blue-400" />
-              <span>Cấu Hình Tự Động Ghi Vào &quot;Trang tính 2&quot;</span>
+              <span>Cấu Hình Apps Script (Trang tính 1, 2, 3, 4 &amp; 5)</span>
             </h3>
             <p className="text-slate-400 mt-1 leading-relaxed">
-              Hệ thống đã tự động tích hợp mã Google Apps Script hoàn chỉnh để đồng bộ danh sách thí sinh &amp; cột <strong>Thongbao (M–O)</strong> từ <strong>Trang tính 1</strong>, ghi lịch sử đăng nhập vào <strong>Trang tính 2</strong> và lưu kết quả test hướng nghiệp.
+              Hệ thống đã tích hợp sẵn mã Google Apps Script hỗ trợ đọc phân quyền QTV, cấu hình A2 &amp; link bài thi từ <strong>Trang tính 4</strong>, danh sách &amp; đăng ký tài khoản trực tiếp vào <strong>Trang tính 3 (cột M–X)</strong>, danh sách từ <strong>Trang tính 1</strong>, ghi lịch sử đăng nhập vào <strong>Trang tính 2</strong> và lưu thông tin + kết quả hướng nghiệp RIASEC vào <strong>Trang tính 5</strong>.
             </p>
+            <div className="mt-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] leading-relaxed">
+              <strong>Lưu ý khi cập nhật mã:</strong> Sau khi dán mã mới vào trình chỉnh sửa Google Apps Script, hãy chọn <strong>Triển khai (Deploy) → Quản lý các bản triển khai (Manage deployments) → Biểu tượng chỉnh sửa (Edit) → Phiên bản: Phiên bản mới (New version) → Triển khai</strong> (giữ nguyên URL cũ để mọi thay đổi có hiệu lực ngay).
+            </div>
           </div>
 
           <div>
             <label className="block text-[11px] font-bold text-slate-300 mb-1">
               URL Web App của Google Apps Script:
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 id="input-admin-script-url-setting"
                 value={scriptUrlInput}
                 onChange={(e) => setScriptUrlInput(e.target.value)}
                 placeholder="https://script.google.com/macros/s/.../exec"
-                className="flex-1 px-3 py-2 bg-[#080a14] border border-slate-700 rounded-xl text-slate-200 text-xs font-mono outline-none focus:border-indigo-500"
+                className="flex-1 min-h-[42px] px-3 py-2 bg-[#080a14] border border-slate-700 rounded-xl text-slate-200 text-base sm:text-xs font-mono outline-none focus:border-indigo-500"
               />
               <button
                 type="button"
@@ -1210,7 +1529,7 @@ export const AdminSheet2View: React.FC<AdminSheet2ViewProps> = ({
                   setTimeout(() => setScriptUrlSaved(false), 3000);
                   triggerCopyFeedback('Đã cập nhật URL Google Apps Script!');
                 }}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                className="min-h-[42px] px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition cursor-pointer shrink-0"
               >
                 Lưu URL
               </button>

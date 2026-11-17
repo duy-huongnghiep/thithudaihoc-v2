@@ -1,4 +1,10 @@
-import { ExamScheduleInfo, StudentInfo } from '../types';
+import {
+  AdminPermissions,
+  ExamScheduleInfo,
+  RegistrationExamConfig,
+  SheetGlobalConfig,
+  StudentInfo,
+} from '../types';
 
 export const DEFAULT_SCRIPT_URL =
   'https://script.google.com/macros/s/AKfycbxv_LnzrD7mTAAoQYYgEZjdcW8cCNcVoEu1rPCEU2V-EGMaiRLtGRU3yv3sV3WPkeUZTA/exec';
@@ -8,6 +14,8 @@ const CACHE_KEY = 'td_mock_exam_students_cache';
 const CACHE_TIME_KEY = 'td_mock_exam_students_time';
 const CACHE_SCHEDULE_KEY = 'td_mock_exam_global_schedule';
 const CACHE_NOTICE_KEY = 'td_mock_exam_global_notice';
+const CACHE_SHEET4_ADMINS_KEY = 'td_mock_exam_sheet4_admins';
+const CACHE_SHEET4_CONFIG_KEY = 'td_mock_exam_sheet4_config';
 const CACHE_TTL_MS = 5 * 1000; // 5 seconds cache TTL for high freshness
 
 /**
@@ -15,7 +23,7 @@ const CACHE_TTL_MS = 5 * 1000; // 5 seconds cache TTL for high freshness
  * Ensures instant login & tra cuu even if Google Apps Script is deploying or temporarily unavailable
  */
 const CACHE_VERSION_KEY = 'td_mock_exam_cache_ver';
-const CURRENT_CACHE_VERSION = 'v6_sheet_thongbao';
+const CURRENT_CACHE_VERSION = 'v8_sheet3_register_cutoff';
 
 export const DEFAULT_STUDENTS_SEED: StudentInfo[] = [
   {
@@ -384,9 +392,223 @@ let inMemoryGlobalSchedule: { batdau: string; ketthuc: string } = (() => {
   return { batdau: '', ketthuc: '' };
 })();
 
+const DEFAULT_REGISTRATION_CONFIG: RegistrationExamConfig = {
+  enableHsa: true,
+  enableVact: true,
+  enableThptqg: true,
+  enableHuongnghiep: true,
+};
+
+const DEFAULT_GLOBAL_SHEET_CONFIG: SheetGlobalConfig = {
+  loadedFromSheet4: false,
+  enableHsa: true,
+  enableVact: true,
+  enableThptqg: true,
+  enableHuongnghiep: true,
+  registrationConfig: { ...DEFAULT_REGISTRATION_CONFIG },
+  batdau: '',
+  ketthuc: '',
+  thongbao: '',
+  examLinks: {},
+};
+
+let inMemorySheet4Admins: StudentInfo[] = (() => {
+  try {
+    const saved = localStorage.getItem(CACHE_SHEET4_ADMINS_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+})();
+
+let inMemoryGlobalSheetConfig: SheetGlobalConfig = (() => {
+  try {
+    const saved = localStorage.getItem(CACHE_SHEET4_CONFIG_KEY);
+    if (saved) return { ...DEFAULT_GLOBAL_SHEET_CONFIG, ...JSON.parse(saved) };
+  } catch {
+    // ignore
+  }
+  return { ...DEFAULT_GLOBAL_SHEET_CONFIG };
+})();
+
+const globalConfigListeners = new Set<(cfg: SheetGlobalConfig) => void>();
+
+export function getGlobalSheetConfig(): SheetGlobalConfig {
+  return inMemoryGlobalSheetConfig;
+}
+
+export function getRegistrationConfig(): RegistrationExamConfig {
+  if (inMemoryGlobalSheetConfig.registrationConfig) {
+    return inMemoryGlobalSheetConfig.registrationConfig;
+  }
+  return { ...DEFAULT_REGISTRATION_CONFIG };
+}
+
+export function subscribeGlobalConfig(listener: (cfg: SheetGlobalConfig) => void): () => void {
+  globalConfigListeners.add(listener);
+  return () => {
+    globalConfigListeners.delete(listener);
+  };
+}
+
+export function getExamSectionUrl(sectionId: string, fallbackUrl: string): string {
+  const custom = inMemoryGlobalSheetConfig.examLinks?.[sectionId];
+  if (custom && (custom.startsWith('http://') || custom.startsWith('https://'))) {
+    return custom;
+  }
+  return fallbackUrl;
+}
+
+export function getAdminPermissions(student: StudentInfo | null | undefined): AdminPermissions {
+  if (student?.adminPermissions) {
+    return {
+      lichsu: Boolean(student.adminPermissions.lichsu),
+      ketquahuongnghiep: Boolean(student.adminPermissions.ketquahuongnghiep),
+      danhsachtaikhoan: Boolean(student.adminPermissions.danhsachtaikhoan),
+      cauhinh: Boolean(student.adminPermissions.cauhinh),
+      hanche: Boolean(student.adminPermissions.hanche),
+      danhsachdkytk: String(student.adminPermissions.danhsachdkytk || '').trim(),
+    };
+  }
+  // Default permissions for legacy Sheet 1 admins before Sheet 4 is deployed
+  return {
+    lichsu: true,
+    ketquahuongnghiep: true,
+    danhsachtaikhoan: true,
+    cauhinh: true,
+    hanche: false,
+    danhsachdkytk: '',
+  };
+}
+
+/**
+ * Parse a Vietnam date cutoff (e.g., "1/11/2026" -> 00:00:00 GMT+7 on Nov 1, 2026)
+ * Strictly interprets D/M/YYYY as Day-First!
+ */
+export function parseVietnamDateCutoff(val?: string | null): number | null {
+  if (!val) return null;
+  const s = String(val).trim();
+  if (!s) return null;
+
+  // Match D/M/YYYY or DD-MM-YYYY (with optional time ignored -> start of day 00:00:00 GMT+7)
+  const dmY = s.match(/(?:^|\s)(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s|$)/);
+  if (dmY) {
+    const day = Number(dmY[1]);
+    const month = Number(dmY[2]);
+    const year = Number(dmY[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return Date.UTC(year, month - 1, day, -7, 0, 0, 0);
+    }
+  }
+
+  // Match YYYY-MM-DD
+  const yMd = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (yMd) {
+    const year = Number(yMd[1]);
+    const month = Number(yMd[2]);
+    const day = Number(yMd[3]);
+    return Date.UTC(year, month - 1, day, -7, 0, 0, 0);
+  }
+
+  const parsed = new Date(s);
+  if (isNaN(parsed.getTime())) return null;
+  // Normalize to start of day in GMT+7
+  const vnOffsetMs = 7 * 3600 * 1000;
+  const vnDate = new Date(parsed.getTime() + vnOffsetMs);
+  return Date.UTC(vnDate.getUTCFullYear(), vnDate.getUTCMonth(), vnDate.getUTCDate(), -7, 0, 0, 0);
+}
+
+/**
+ * Parse a Vietnam timestamp string ("08:15:22 11/11/2026", "11/11/2026 08:15:22", "11/11/2026", or ISO)
+ * into UTC milliseconds for accurate comparison against parseVietnamDateCutoff.
+ */
+export function parseVietnamTimestampMs(val?: string | null, fallbackIso?: string | null): number | null {
+  const s = String(val || '').trim();
+  if (s) {
+    // Format 1: HH:mm(:ss) DD/MM/YYYY
+    let m = s.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s+(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (m) {
+      const [, h, min, sec = '0', d, mon, y] = m;
+      return Date.UTC(Number(y), Number(mon) - 1, Number(d), Number(h) - 7, Number(min), Number(sec));
+    }
+    // Format 2: DD/MM/YYYY HH:mm(:ss)
+    m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+    if (m) {
+      const [, d, mon, y, h, min, sec = '0'] = m;
+      return Date.UTC(Number(y), Number(mon) - 1, Number(d), Number(h) - 7, Number(min), Number(sec));
+    }
+    // Format 3: DD/MM/YYYY
+    m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (m) {
+      const [, d, mon, y] = m;
+      return Date.UTC(Number(y), Number(mon) - 1, Number(d), -7, 0, 0, 0);
+    }
+    const parsed = new Date(s);
+    if (!isNaN(parsed.getTime())) return parsed.getTime();
+  }
+  if (fallbackIso) {
+    const iso = new Date(fallbackIso);
+    if (!isNaN(iso.getTime())) return iso.getTime();
+  }
+  return null;
+}
+
+function setGlobalSheetConfig(cfg: SheetGlobalConfig): void {
+  inMemoryGlobalSheetConfig = cfg;
+  try {
+    localStorage.setItem(CACHE_SHEET4_CONFIG_KEY, JSON.stringify(cfg));
+  } catch {
+    // ignore
+  }
+  globalConfigListeners.forEach((cb) => {
+    try {
+      cb(cfg);
+    } catch {
+      // ignore
+    }
+  });
+}
+
+export function sanitizeSystemNotice(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  const lower = s.toLowerCase();
+  if (
+    lower === '0' ||
+    lower === 'không' ||
+    lower === 'khong' ||
+    lower === 'none' ||
+    lower === 'null' ||
+    lower === 'undefined' ||
+    lower === 'false' ||
+    lower === '-'
+  ) {
+    return '';
+  }
+  // Ignore bare schedule date/time strings accidentally left in row 2 (e.g. "00:00 30/11/2026", "30/11/2026")
+  if (
+    /^\d{1,2}:\d{2}(?::\d{2})?\s+\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(s) ||
+    /^\d{1,2}[/-]\d{1,2}[/-]\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/.test(s) ||
+    /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?$/.test(s) ||
+    /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{4}\b.*GMT[+-]\d{4}/i.test(s)
+  ) {
+    return '';
+  }
+  return s;
+}
+
 let inMemoryGlobalNotice: string = (() => {
   try {
-    return localStorage.getItem(CACHE_NOTICE_KEY) || '';
+    const raw = localStorage.getItem(CACHE_NOTICE_KEY) || '';
+    const cleaned = sanitizeSystemNotice(raw);
+    if (!cleaned && raw) {
+      localStorage.removeItem(CACHE_NOTICE_KEY);
+    }
+    return cleaned;
   } catch {
     return '';
   }
@@ -406,7 +628,7 @@ export function subscribeGlobalNotice(listener: (notice: string) => void): () =>
 }
 
 function setGlobalNotice(value: string): void {
-  const normalized = value.trim();
+  const normalized = sanitizeSystemNotice(value);
   if (inMemoryGlobalNotice === normalized) return;
   inMemoryGlobalNotice = normalized;
   try {
@@ -430,7 +652,7 @@ function setGlobalNotice(value: string): void {
 function extractNoticeFromRawItem(item: unknown): string {
   if (!item) return '';
   if (Array.isArray(item)) {
-    return String(item[12] || item[13] || item[14] || '').trim();
+    return sanitizeSystemNotice(item[12] || item[13] || item[14] || '');
   }
   const rec = item as Record<string, unknown>;
   const direct =
@@ -443,12 +665,12 @@ function extractNoticeFromRawItem(item: unknown): string {
     rec['notice'] ??
     rec['announcement'];
   if (direct !== undefined && direct !== null && String(direct).trim()) {
-    return String(direct).trim();
+    return sanitizeSystemNotice(direct);
   }
   for (const k of Object.keys(rec)) {
     const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (cleanK === 'thongbao' || cleanK === 'notice' || cleanK === 'announcement') {
-      const v = String(rec[k] ?? '').trim();
+      const v = sanitizeSystemNotice(rec[k]);
       if (v) return v;
     }
   }
@@ -473,7 +695,8 @@ export function cleanDigits(val: string | number | undefined | null): string {
   return val ? String(val).replace(/\D/g, '') : '';
 }
 
-export function isYes(val: string | number | undefined | null): boolean {
+export function isYes(val: string | number | boolean | undefined | null): boolean {
+  if (val === true) return true;
   if (!val) return false;
   const v = String(val).toLowerCase().trim();
   return (
@@ -483,6 +706,9 @@ export function isYes(val: string | number | undefined | null): boolean {
     v === '1' ||
     v === 'yes' ||
     v === 'true' ||
+    v === 'tick' ||
+    v === '✓' ||
+    v === '✔' ||
     v === 'đăng ký' ||
     v === 'dang ky'
   );
@@ -833,6 +1059,12 @@ export function parseStudentInfo(row: unknown, index?: number): StudentInfo {
     parsedEmail.toLowerCase() === 'admin' ||
     parsedSbd.toLowerCase().startsWith('ad');
 
+  const rawZone = (record as any)?.sourceZone;
+  const sourceZone: StudentInfo['sourceZone'] =
+    rawZone === 'sheet3_web' || rawZone === 'sheet3_manual' || rawZone === 'sheet1'
+      ? rawZone
+      : undefined;
+
   return {
     username: parsedUsername,
     password: getFieldValue('password', ['pass', 'matkhau', 'mk']),
@@ -847,37 +1079,174 @@ export function parseStudentInfo(row: unknown, index?: number): StudentInfo {
     batdau: getFieldValue('batdau', ['start', 'open', 'thoigianbatdau', 'tgstart']),
     ketthuc: getFieldValue('ketthuc', ['end', 'close', 'thoigianketthuc', 'han', 'tgend']),
     thongbao: getFieldValue('thongbao', ['Thongbao', 'thong_bao', 'notice', 'announcement']),
+    registeredAt: getFieldValue('registeredAt', ['time', 'thoigian', 'thoigiandangky', 'createdAt']),
+    sourceZone,
     rowNumber,
     isAdmin,
   };
 }
 
 export function finalizeStudentList(list: StudentInfo[]): StudentInfo[] {
-  // Extract global schedule from any row that has it (applies to all students)
-  const foundBatdau = list.find((s) => s.batdau && s.batdau.trim())?.batdau?.trim() || '';
-  const foundKetthuc = list.find((s) => s.ketthuc && s.ketthuc.trim())?.ketthuc?.trim() || '';
+  // If Sheet 4 QTV A2 config is active, QTV A2 strictly controls Batdau/Ketthuc!
+  if (!inMemoryGlobalSheetConfig.loadedFromSheet4) {
+    const foundBatdau = list.find((s) => s.batdau && s.batdau.trim())?.batdau?.trim() || '';
+    const foundKetthuc = list.find((s) => s.ketthuc && s.ketthuc.trim())?.ketthuc?.trim() || '';
 
-  if (foundBatdau || foundKetthuc) {
-    inMemoryGlobalSchedule = {
-      batdau: foundBatdau,
-      ketthuc: foundKetthuc,
-    };
-    try {
-      localStorage.setItem(CACHE_SCHEDULE_KEY, JSON.stringify(inMemoryGlobalSchedule));
-    } catch {
-      // ignore
+    if (foundBatdau || foundKetthuc) {
+      inMemoryGlobalSchedule = {
+        batdau: foundBatdau,
+        ketthuc: foundKetthuc,
+      };
+      try {
+        localStorage.setItem(CACHE_SCHEDULE_KEY, JSON.stringify(inMemoryGlobalSchedule));
+      } catch {
+        // ignore
+      }
     }
   }
 
   return list.map((s) => ({
     ...s,
-    batdau: s.batdau?.trim() || inMemoryGlobalSchedule.batdau,
-    ketthuc: s.ketthuc?.trim() || inMemoryGlobalSchedule.ketthuc,
+    batdau: inMemoryGlobalSheetConfig.loadedFromSheet4
+      ? inMemoryGlobalSheetConfig.batdau
+      : s.batdau?.trim() || inMemoryGlobalSchedule.batdau,
+    ketthuc: inMemoryGlobalSheetConfig.loadedFromSheet4
+      ? inMemoryGlobalSheetConfig.ketthuc
+      : s.ketthuc?.trim() || inMemoryGlobalSchedule.ketthuc,
   }));
+}
+
+function applySheet4Data(sheet4Payload: any): boolean {
+  if (!sheet4Payload || !sheet4Payload.deployed) return false;
+
+  const adminsRaw = Array.isArray(sheet4Payload.admins) ? sheet4Payload.admins : [];
+  const mappedAdmins: StudentInfo[] = adminsRaw.map((a: any) => ({
+    username: String(a.username || '').trim(),
+    password: String(a.password || '').trim(),
+    sbd: String(a.sbd || `ad${(a.rowNumber || 2) - 1}`).trim(),
+    hoten: String(a.hoten || a.username || '').trim(),
+    email: String(a.email || '').trim(),
+    namsinh: '',
+    hsa: '',
+    vact: '',
+    thptqg: '',
+    huongnghiep: '',
+    batdau: sheet4Payload.globalConfig?.batdau || '',
+    ketthuc: sheet4Payload.globalConfig?.ketthuc || '',
+    thongbao: sheet4Payload.globalConfig?.thongbao || '',
+    rowNumber: a.rowNumber,
+    isAdmin: true,
+    adminPermissions: {
+      lichsu: Boolean(a.adminPermissions?.lichsu),
+      ketquahuongnghiep: Boolean(a.adminPermissions?.ketquahuongnghiep),
+      danhsachtaikhoan: Boolean(a.adminPermissions?.danhsachtaikhoan),
+      cauhinh: Boolean(a.adminPermissions?.cauhinh),
+      hanche: Boolean(a.adminPermissions?.hanche),
+      danhsachdkytk: String(a.adminPermissions?.danhsachdkytk || '').trim(),
+    },
+  }));
+
+  inMemorySheet4Admins = mappedAdmins;
+  try {
+    localStorage.setItem(CACHE_SHEET4_ADMINS_KEY, JSON.stringify(mappedAdmins));
+  } catch {
+    // ignore
+  }
+
+  if (sheet4Payload.globalConfig) {
+    const gc = sheet4Payload.globalConfig;
+    const batdau = String(gc.batdau ?? '').trim();
+    const ketthuc = String(gc.ketthuc ?? '').trim();
+    const thongbao = sanitizeSystemNotice(gc.thongbao);
+    const rawReg = sheet4Payload.registrationConfig || gc.registrationConfig;
+    const registrationConfig: RegistrationExamConfig = rawReg
+      ? {
+          enableHsa: Boolean(rawReg.enableHsa),
+          enableVact: Boolean(rawReg.enableVact),
+          enableThptqg: Boolean(rawReg.enableThptqg),
+          enableHuongnghiep: Boolean(rawReg.enableHuongnghiep),
+        }
+      : { ...DEFAULT_REGISTRATION_CONFIG };
+
+    const nextCfg: SheetGlobalConfig = {
+      loadedFromSheet4: true,
+      enableHsa: Boolean(gc.enableHsa),
+      enableVact: Boolean(gc.enableVact),
+      enableThptqg: Boolean(gc.enableThptqg),
+      enableHuongnghiep: Boolean(gc.enableHuongnghiep),
+      registrationConfig,
+      batdau,
+      ketthuc,
+      thongbao,
+      examLinks: sheet4Payload.examLinks || gc.examLinks || {},
+    };
+
+    // Strictly enforce QTV A2 Batdau/Ketthuc & Thongbao
+    inMemoryGlobalSchedule = { batdau, ketthuc };
+    try {
+      localStorage.setItem(CACHE_SCHEDULE_KEY, JSON.stringify(inMemoryGlobalSchedule));
+    } catch {
+      // ignore
+    }
+    setGlobalNotice(thongbao);
+    setGlobalSheetConfig(nextCfg);
+  }
+
+  return true;
+}
+
+async function fetchSheet4FromNetwork(currentUrl: string, forceRefresh = false): Promise<boolean> {
+  // Strategy 1: Proxy /api/sheet4-data
+  try {
+    const proxyUrl = `/api/sheet4-data?url=${encodeURIComponent(currentUrl)}${forceRefresh ? `&_t=${Date.now()}` : ''}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(proxyUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const payload = await res.json();
+      if (applySheet4Data(payload)) return true;
+    }
+  } catch {
+    // continue to direct GAS fallback
+  }
+
+  // Strategy 2: Direct GAS fetch (for static / GitHub Pages builds)
+  try {
+    const sep = currentUrl.includes('?') ? '&' : '?';
+    const targetUrl = `${currentUrl}${sep}action=get_sheet4&_t=${Date.now()}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(targetUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const text = await res.text();
+      if (!text.trim().startsWith('<')) {
+        const parsed = JSON.parse(text);
+        if (parsed && !Array.isArray(parsed) && parsed.deployed) {
+          return applySheet4Data(parsed);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 async function fetchFromNetwork(forceRefresh = false): Promise<StudentInfo[]> {
   const currentUrl = getScriptUrl();
+
+  // Fetch Sheet 4 first/in parallel so globalConfig (QTV A2) is known before finalizing Sheet 1 rows
+  const sheet4Promise = fetchSheet4FromNetwork(currentUrl, forceRefresh);
 
   // Strategy 1: Local server proxy /api/sheet-data (No CORS, No Origin 403, 100% reliable)
   try {
@@ -885,19 +1254,25 @@ async function fetchFromNetwork(forceRefresh = false): Promise<StudentInfo[]> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const res = await fetch(proxyUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-      signal: controller.signal,
-    });
+    const [res, sheet4Loaded] = await Promise.all([
+      fetch(proxyUrl, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+        signal: controller.signal,
+      }),
+      sheet4Promise,
+    ]);
     clearTimeout(timeoutId);
 
     if (res.ok) {
       const rawData = await res.json();
       if (Array.isArray(rawData)) {
-        syncGlobalNoticeFromRawRows(rawData);
+        // Only fall back to Sheet 1 Thongbao if Sheet 4 QTV A2 config isn't deployed yet
+        if (!sheet4Loaded && !inMemoryGlobalSheetConfig.loadedFromSheet4) {
+          syncGlobalNoticeFromRawRows(rawData);
+        }
         const parsed = rawData
           .map((item, idx) => parseStudentInfo(item, idx))
           .filter((s) => s.username || s.hoten || s.sbd);
@@ -921,13 +1296,16 @@ async function fetchFromNetwork(forceRefresh = false): Promise<StudentInfo[]> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(targetUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-      signal: controller.signal,
-    });
+    const [res, sheet4Loaded] = await Promise.all([
+      fetch(targetUrl, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+        signal: controller.signal,
+      }),
+      sheet4Promise,
+    ]);
     clearTimeout(timeoutId);
 
     if (res.ok) {
@@ -941,7 +1319,9 @@ async function fetchFromNetwork(forceRefresh = false): Promise<StudentInfo[]> {
       ) {
         const rawData = JSON.parse(text);
         if (Array.isArray(rawData)) {
-          syncGlobalNoticeFromRawRows(rawData);
+          if (!sheet4Loaded && !inMemoryGlobalSheetConfig.loadedFromSheet4) {
+            syncGlobalNoticeFromRawRows(rawData);
+          }
           const parsed = rawData
             .map((item, idx) => parseStudentInfo(item, idx))
             .filter((s) => s.username || s.hoten || s.sbd);
@@ -1101,14 +1481,23 @@ function findStudentCredentials(students: StudentInfo[], user: string, pass: str
 }
 
 export async function authenticateStudent(user: string, pass: string): Promise<StudentInfo | null> {
+  // 1. Check Trang tính 4 admin accounts FIRST (exact username + password match)
+  let adminMatch = findStudentCredentials(inMemorySheet4Admins, user, pass);
+  if (adminMatch) return adminMatch;
+
   const students = await getStudentsData();
+  adminMatch = findStudentCredentials(inMemorySheet4Admins, user, pass);
+  if (adminMatch) return adminMatch;
+
   let student = findStudentCredentials(students, user, pass);
 
   // AUTO-SYNC: If not found, immediately force live revalidation with Google Sheets!
-  // Handles instant logins right after submitting the Google registration form
+  // Handles instant logins right after submitting the Google registration form or adding an Admin on Sheet 4
   if (!student) {
     try {
       const freshStudents = await getStudentsData(true);
+      adminMatch = findStudentCredentials(inMemorySheet4Admins, user, pass);
+      if (adminMatch) return adminMatch;
       student = findStudentCredentials(freshStudents, user, pass);
     } catch {
       // ignore
@@ -1141,6 +1530,210 @@ export function initAutoSync(): void {
       getStudentsData(true).catch(() => {});
     }
   }, 5000);
+}
+
+// Register a new student account directly on the web -> saves to Trang tính 3 (columns M-X)
+export interface RegisterAccountPayload {
+  username: string;
+  password: string;
+  hoten: string;
+  email: string;
+  namsinh: string;
+  hsa: boolean;
+  vact: boolean;
+  thptqg: boolean;
+  huongnghiep: boolean;
+}
+
+export async function syncPendingRegistrations(): Promise<{
+  success: boolean;
+  syncedCount: number;
+  remainingCount: number;
+  needsGasUpdate: boolean;
+}> {
+  const scriptUrl = getScriptUrl();
+  try {
+    const res = await fetch('/api/sync-registrations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scriptUrl }),
+    });
+    const json = await res.json().catch(() => null);
+    if (res.ok && json?.success) {
+      return {
+        success: true,
+        syncedCount: Number(json.syncedCount || 0),
+        remainingCount: Number(json.remainingCount || 0),
+        needsGasUpdate: Boolean(json.needsGasUpdate),
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return { success: false, syncedCount: 0, remainingCount: 0, needsGasUpdate: true };
+}
+
+export async function registerStudentAccount(
+  payload: RegisterAccountPayload
+): Promise<{
+  success: boolean;
+  synced?: boolean;
+  needsGasUpdate?: boolean;
+  student?: StudentInfo;
+  message?: string;
+}> {
+  const cleanUser = payload.username.trim();
+  const cleanDigitsUser = cleanDigits(cleanUser);
+
+  // Refresh current student roster first to catch duplicates cleanly
+  const existing = await getStudentsData(true).catch(() => inMemoryStudents);
+  const duplicate = existing.find((s) => {
+    const u = (s.username || '').trim().toLowerCase();
+    return (
+      u === cleanUser.toLowerCase() ||
+      (cleanDigitsUser.length >= 8 && cleanDigits(u) === cleanDigitsUser)
+    );
+  });
+
+  if (duplicate) {
+    return {
+      success: false,
+      message: `Số điện thoại / tài khoản "${cleanUser}" đã được đăng ký trước đó (SBD: ${duplicate.sbd || 'đã cấp'}). Vui lòng đăng nhập hoặc tra cứu!`,
+    };
+  }
+
+  const existingSbds = new Set(existing.map((s) => (s.sbd || '').trim()));
+  let generatedSbd = '';
+  do {
+    generatedSbd = String(Math.floor(10000 + Math.random() * 89999));
+  } while (existingSbds.has(generatedSbd));
+
+  const formatNowVn = () => {
+    try {
+      return new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      })
+        .format(new Date())
+        .replace(',', '');
+    } catch {
+      const d = new Date();
+      const p = (n: number) => String(n).padStart(2, '0');
+      return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(
+        d.getHours()
+      )}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    }
+  };
+
+  const nowStr = formatNowVn();
+  const scriptUrl = getScriptUrl();
+
+  let newStudent: StudentInfo = {
+    username: cleanUser,
+    password: payload.password.trim(),
+    sbd: generatedSbd,
+    hoten: payload.hoten.trim(),
+    email: payload.email.trim(),
+    namsinh: payload.namsinh.trim(),
+    hsa: payload.hsa ? 'Có' : 'Không',
+    vact: payload.vact ? 'Có' : 'Không',
+    thptqg: payload.thptqg ? 'Có' : 'Không',
+    huongnghiep: payload.huongnghiep ? 'Có' : 'Không',
+    batdau: inMemoryGlobalSheetConfig.loadedFromSheet4
+      ? inMemoryGlobalSheetConfig.batdau
+      : inMemoryGlobalSchedule.batdau,
+    ketthuc: inMemoryGlobalSheetConfig.loadedFromSheet4
+      ? inMemoryGlobalSheetConfig.ketthuc
+      : inMemoryGlobalSchedule.ketthuc,
+    registeredAt: nowStr,
+    sourceZone: 'sheet3_web',
+    isAdmin: false,
+  };
+
+  // Strategy 1: Local Express server proxy /api/register
+  let handledByServer = false;
+  let gasSynced = false;
+  let needsGasUpdate = false;
+  try {
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        username: cleanUser,
+        sbd: generatedSbd,
+        time: nowStr,
+        scriptUrl,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (res.status === 409 || json?.duplicate) {
+      return {
+        success: false,
+        message: json?.message || 'Số điện thoại / tài khoản này đã được đăng ký trước đó!',
+      };
+    }
+    if (res.ok && json?.success && json?.student) {
+      handledByServer = true;
+      gasSynced = Boolean(json.synced);
+      needsGasUpdate = Boolean(json.needsGasUpdate);
+      newStudent = finalizeStudentList([parseStudentInfo(json.student)])[0];
+    }
+  } catch {
+    // fallback to direct GAS POST
+  }
+
+  // Strategy 2: Direct GAS POST fallback (for static builds without backend proxy)
+  if (!handledByServer) {
+    try {
+      await fetch(scriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'register_account',
+          time: nowStr,
+          username: cleanUser,
+          taikhoan: cleanUser,
+          password: payload.password.trim(),
+          pass: payload.password.trim(),
+          sbd: generatedSbd,
+          sobaodanh: generatedSbd,
+          hoten: payload.hoten.trim(),
+          email: payload.email.trim(),
+          namsinh: payload.namsinh.trim(),
+          hsa: newStudent.hsa,
+          vact: newStudent.vact,
+          thptqg: newStudent.thptqg,
+          huongnghiep: newStudent.huongnghiep,
+        }),
+      });
+    } catch {
+      // keep local registration state
+    }
+  }
+
+  // Immediately update in-memory and localStorage cache for instant login & search
+  inMemoryStudents = [newStudent, ...inMemoryStudents.filter((s) => s.username !== newStudent.username)];
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(inMemoryStudents));
+    localStorage.setItem(CACHE_TIME_KEY, String(Date.now()));
+  } catch {
+    // ignore
+  }
+
+  return {
+    success: true,
+    synced: gasSynced,
+    needsGasUpdate,
+    student: newStudent,
+  };
 }
 
 // Prefetch data silently on app initialization & activate auto-sync

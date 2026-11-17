@@ -11,6 +11,7 @@ import path from 'path';
 
 const LOGS_FILE_PATH = path.join(process.cwd(), 'login_logs_store.json');
 const CAREER_RESULTS_FILE_PATH = path.join(process.cwd(), 'career_results_store.json');
+const REGISTERED_STUDENTS_FILE_PATH = path.join(process.cwd(), 'registered_students_store.json');
 
 // Initialize initial default logs if store doesn't exist yet
 const INITIAL_LOG_SEEDS = [
@@ -146,9 +147,55 @@ function persistCareerResults(results: any[]): void {
   }
 }
 
+function loadSavedRegisteredStudents(): any[] {
+  try {
+    if (fs.existsSync(REGISTERED_STUDENTS_FILE_PATH)) {
+      const raw = fs.readFileSync(REGISTERED_STUDENTS_FILE_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function persistRegisteredStudents(students: any[]): void {
+  try {
+    fs.writeFileSync(REGISTERED_STUDENTS_FILE_PATH, JSON.stringify(students, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error persisting registered students:', err);
+  }
+}
+
 // In-memory stores synced with files
 let inMemoryLogs = loadSavedLogs();
 let inMemoryCareerResults = loadSavedCareerResults();
+let inMemoryRegisteredStudents = loadSavedRegisteredStudents();
+
+function formatVietnamNow(): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    return formatter.format(new Date()).replace(',', '');
+  } catch {
+    const d = new Date(Date.now() + 7 * 3600 * 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${pad(
+      d.getUTCHours()
+    )}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  }
+}
 
 function parseViTimestampToIso(ts: string): string {
   if (!ts) return new Date().toISOString();
@@ -234,6 +281,33 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  const sanitizeNotice = (raw: unknown): string => {
+    const s = String(raw ?? '').trim();
+    if (!s) return '';
+    const lower = s.toLowerCase();
+    if (
+      lower === '0' ||
+      lower === 'không' ||
+      lower === 'khong' ||
+      lower === 'none' ||
+      lower === 'null' ||
+      lower === 'undefined' ||
+      lower === 'false' ||
+      lower === '-'
+    ) {
+      return '';
+    }
+    if (
+      /^\d{1,2}:\d{2}(?::\d{2})?\s+\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(s) ||
+      /^\d{1,2}[/-]\d{1,2}[/-]\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/.test(s) ||
+      /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?$/.test(s) ||
+      /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{4}\b.*GMT[+-]\d{4}/i.test(s)
+    ) {
+      return '';
+    }
+    return s;
+  };
+
   // Helper to enrich student objects with row numbers and admin flags
   const enrichStudentRow = (item: any, index: number) => {
     const rowNumber = index + 2; // Row 2 = A2, Row 3 = A3...
@@ -251,9 +325,9 @@ async function startServer() {
       sbd.startsWith('ad') ||
       item?.isAdmin === true;
 
-    const thongbao = String(
+    const thongbao = sanitizeNotice(
       item?.thongbao ?? item?.Thongbao ?? item?.thongBao ?? item?.notice ?? ''
-    ).trim();
+    );
 
     return {
       ...item,
@@ -291,27 +365,341 @@ async function startServer() {
       const text = await response.text();
 
       // Check if valid JSON array
+      let rawArray: any[] | null = null;
       try {
         const data = JSON.parse(text);
         if (Array.isArray(data)) {
-          return res.json(data.map(enrichStudentRow));
+          rawArray = data;
+        } else {
+          return res.json(data);
         }
-        return res.json(data);
       } catch {
         // Strip JSONP callback if any e.g. cb(...)
         const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
         if (match) {
           const innerData = JSON.parse(match[1]);
           if (Array.isArray(innerData)) {
-            return res.json(innerData.map(enrichStudentRow));
+            rawArray = innerData;
+          } else {
+            return res.json(innerData);
           }
-          return res.json(innerData);
+        } else {
+          return res.status(500).json({ error: 'Invalid response format from Google Apps Script' });
         }
-        return res.status(500).json({ error: 'Invalid response format from Google Apps Script' });
       }
+
+      const enriched = (rawArray || []).map(enrichStudentRow);
+      // Merge any newly registered web accounts that haven't appeared in Sheet feed yet
+      const seenUsernames = new Set(
+        enriched.map((s) => String(s?.username || s?.taikhoan || '').trim().toLowerCase()).filter(Boolean)
+      );
+      const merged = [...enriched];
+      for (const localSt of inMemoryRegisteredStudents) {
+        const u = String(localSt?.username || '').trim().toLowerCase();
+        if (u && !seenUsernames.has(u)) {
+          seenUsernames.add(u);
+          merged.unshift({
+            ...localSt,
+            sourceZone: 'sheet3_web',
+            isAdmin: false,
+          });
+        }
+      }
+      return res.json(merged);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Unknown proxy error';
       return res.status(500).json({ error: msg });
+    }
+  });
+
+  // Helper: push any pending web-registered students (synced !== true) to Trang tính 3 via latest GAS
+  const syncPendingRegistrationsToGas = async (cleanUrl: string) => {
+    const pending = inMemoryRegisteredStudents.filter((s) => s.synced !== true);
+    if (pending.length === 0) {
+      return { syncedCount: 0, remainingCount: 0, needsGasUpdate: false };
+    }
+
+    let syncedCount = 0;
+    let needsGasUpdate = false;
+    const updatedList = [...inMemoryRegisteredStudents];
+
+    for (let i = 0; i < updatedList.length; i++) {
+      const st = updatedList[i];
+      if (st.synced === true) continue;
+
+      try {
+        const gasRes = await fetch(cleanUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'register_account',
+            time: st.registeredAt || formatVietnamNow(),
+            username: st.username,
+            taikhoan: st.username,
+            password: st.password,
+            pass: st.password,
+            sbd: st.sbd,
+            sobaodanh: st.sbd,
+            hoten: st.hoten,
+            email: st.email || '',
+            namsinh: st.namsinh || '',
+            hsa: st.hsa || 'Không',
+            vact: st.vact || 'Không',
+            thptqg: st.thptqg || 'Không',
+            huongnghiep: st.huongnghiep || 'Không',
+          }),
+          redirect: 'follow',
+        });
+        const gasText = await gasRes.text();
+        const parsed = JSON.parse(gasText);
+        if (
+          (parsed?.status === 'success' &&
+            (parsed?.targetSheet === 'Trang tính 3' || parsed?.rowNumber !== undefined)) ||
+          (parsed?.status === 'duplicate' && parsed?.targetSheet === 'Trang tính 3')
+        ) {
+          updatedList[i] = {
+            ...st,
+            sbd: parsed?.sbd ? String(parsed.sbd).trim() : st.sbd,
+            registeredAt: parsed?.time ? String(parsed.time).trim() : st.registeredAt,
+            synced: true,
+          };
+          syncedCount++;
+        } else if (
+          parsed?.status === 'success' &&
+          String(parsed?.message || '').includes('Trang tính 2')
+        ) {
+          needsGasUpdate = true;
+          break;
+        }
+      } catch {
+        // leave unsynced for retry
+      }
+    }
+
+    if (syncedCount > 0) {
+      inMemoryRegisteredStudents = updatedList;
+      persistRegisteredStudents(inMemoryRegisteredStudents);
+    }
+
+    const remainingCount = inMemoryRegisteredStudents.filter((s) => s.synced !== true).length;
+    return { syncedCount, remainingCount, needsGasUpdate };
+  };
+
+  // API proxy route to fetch Trang tính 4 (Admin accounts, permissions, QTV A2 config, and exam links)
+  app.get('/api/sheet4-data', async (req, res) => {
+    try {
+      const customUrl = (req.query.url as string) || GOOGLE_SCRIPT_URL;
+      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
+        ? customUrl.trim()
+        : GOOGLE_SCRIPT_URL;
+
+      const sep = cleanUrl.includes('?') ? '&' : '?';
+      const targetUrl = `${cleanUrl}${sep}action=get_sheet4&_t=${Date.now()}`;
+
+      const response = await fetch(targetUrl, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        redirect: 'follow',
+      });
+
+      if (!response.ok) {
+        return res.json({ deployed: false, admins: [], globalConfig: null, registrationConfig: null, examLinks: {} });
+      }
+
+      const text = await response.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
+        if (match) {
+          data = JSON.parse(match[1]);
+        }
+      }
+
+      // If old GAS returned an array (Sheet 1 fallback), signal deployed: false gracefully
+      if (!data || Array.isArray(data) || (!Array.isArray(data.admins) && !data.globalConfig)) {
+        return res.json({ deployed: false, admins: [], globalConfig: null, registrationConfig: null, examLinks: {} });
+      }
+
+      const regConfig = data.registrationConfig || data.globalConfig?.registrationConfig || null;
+      // If newest GAS (with Sheet 3 + registrationConfig) is active and we have unsynced accounts, sync them automatically
+      if (regConfig && inMemoryRegisteredStudents.some((s) => s.synced !== true)) {
+        syncPendingRegistrationsToGas(cleanUrl).catch(() => {});
+      }
+
+      const rawGlobalConfig = data.globalConfig || null;
+      const sanitizedGlobalConfig = rawGlobalConfig
+        ? {
+            ...rawGlobalConfig,
+            thongbao: sanitizeNotice(rawGlobalConfig.thongbao),
+          }
+        : null;
+
+      return res.json({
+        deployed: true,
+        admins: Array.isArray(data.admins) ? data.admins : [],
+        globalConfig: sanitizedGlobalConfig,
+        registrationConfig: regConfig,
+        examLinks: data.examLinks || {},
+        pendingRegistrationSync: inMemoryRegisteredStudents.filter((s) => s.synced !== true).length,
+      });
+    } catch {
+      return res.json({ deployed: false, admins: [], globalConfig: null, registrationConfig: null, examLinks: {} });
+    }
+  });
+
+  // API endpoint to manually trigger syncing pending web registrations -> Trang tính 3
+  app.post('/api/sync-registrations', async (req, res) => {
+    try {
+      const customUrl = (req.query.url as string) || (req.body?.scriptUrl as string) || GOOGLE_SCRIPT_URL;
+      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
+        ? customUrl.trim()
+        : GOOGLE_SCRIPT_URL;
+      const result = await syncPendingRegistrationsToGas(cleanUrl);
+      return res.json({ success: true, ...result });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi đồng bộ tài khoản';
+      return res.status(500).json({ success: false, message: msg });
+    }
+  });
+
+  // API endpoint for direct student registration on web -> writes to Trang tính 3 (cols M-X)
+  app.post('/api/register', async (req, res) => {
+    try {
+      const body = req.body || {};
+      const username = String(body.username || body.taikhoan || '').trim();
+      const password = String(body.password || body.pass || '').trim();
+      const hoten = String(body.hoten || '').trim();
+      const email = String(body.email || '').trim();
+      const namsinh = String(body.namsinh || '').trim();
+      const hsa = body.hsa ? 'Có' : 'Không';
+      const vact = body.vact ? 'Có' : 'Không';
+      const thptqg = body.thptqg ? 'Có' : 'Không';
+      const huongnghiep = body.huongnghiep ? 'Có' : 'Không';
+
+      if (!username || !password || !hoten) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vui lòng nhập đầy đủ Số điện thoại, Mật khẩu và Họ tên.',
+        });
+      }
+
+      const duplicateLocal = inMemoryRegisteredStudents.some(
+        (s) => String(s.username || '').trim().toLowerCase() === username.toLowerCase()
+      );
+      if (duplicateLocal) {
+        return res.status(409).json({
+          success: false,
+          duplicate: true,
+          message: 'Số điện thoại / tài khoản này đã được đăng ký trước đó!',
+        });
+      }
+
+      const existingSbds = new Set(inMemoryRegisteredStudents.map((s) => String(s.sbd || '').trim()));
+      let generatedSbd = String(body.sbd || '').trim();
+      if (!generatedSbd) {
+        do {
+          generatedSbd = String(Math.floor(10000 + Math.random() * 89999));
+        } while (existingSbds.has(generatedSbd));
+      }
+      const timeStr = String(body.time || '').trim() || formatVietnamNow();
+
+      const customUrl = (req.query.url as string) || (body.scriptUrl as string) || GOOGLE_SCRIPT_URL;
+      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
+        ? customUrl.trim()
+        : GOOGLE_SCRIPT_URL;
+
+      let gasSynced = false;
+      let needsGasUpdate = false;
+      let finalSbd = generatedSbd;
+      let finalTime = timeStr;
+
+      try {
+        const gasRes = await fetch(cleanUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'register_account',
+            time: timeStr,
+            username,
+            taikhoan: username,
+            password,
+            pass: password,
+            sbd: generatedSbd,
+            sobaodanh: generatedSbd,
+            hoten,
+            email,
+            namsinh,
+            hsa,
+            vact,
+            thptqg,
+            huongnghiep,
+          }),
+          redirect: 'follow',
+        });
+        const gasText = await gasRes.text();
+        try {
+          const parsed = JSON.parse(gasText);
+          if (parsed?.status === 'duplicate') {
+            return res.status(409).json({
+              success: false,
+              duplicate: true,
+              message: parsed.message || 'Số điện thoại / tài khoản này đã tồn tại trên hệ thống!',
+            });
+          }
+          // Only treat as synced to Trang tính 3 if GAS explicitly returns targetSheet: 'Trang tính 3' or rowNumber
+          if (
+            parsed?.status === 'success' &&
+            (parsed?.targetSheet === 'Trang tính 3' || parsed?.rowNumber !== undefined)
+          ) {
+            gasSynced = true;
+            if (parsed.sbd) finalSbd = String(parsed.sbd).trim();
+            if (parsed.time) finalTime = String(parsed.time).trim();
+          } else {
+            // Older Apps Script fell through to handleLogLogin (Trang tính 2) instead of Trang tính 3
+            needsGasUpdate = true;
+          }
+        } catch {
+          needsGasUpdate = true;
+        }
+      } catch {
+        needsGasUpdate = true;
+      }
+
+      const newStudent = {
+        username,
+        password,
+        sbd: finalSbd,
+        hoten,
+        email,
+        namsinh,
+        hsa,
+        vact,
+        thptqg,
+        huongnghiep,
+        registeredAt: finalTime,
+        sourceZone: 'sheet3_web',
+        isAdmin: false,
+        synced: gasSynced,
+      };
+
+      inMemoryRegisteredStudents = [newStudent, ...inMemoryRegisteredStudents.slice(0, 999)];
+      persistRegisteredStudents(inMemoryRegisteredStudents);
+
+      return res.json({
+        success: true,
+        synced: gasSynced,
+        needsGasUpdate,
+        student: newStudent,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi đăng ký tài khoản';
+      return res.status(500).json({ success: false, message: msg });
     }
   });
 
@@ -519,8 +907,8 @@ async function startServer() {
       try {
         const gasPayload = {
           action: 'log_career',
-          sheet: 'Kết quả hướng nghiệp',
-          sheetName: 'Kết quả hướng nghiệp',
+          sheet: 'Trang tính 5',
+          sheetName: 'Trang tính 5',
           time: timestamp,
           timestamp,
           isoDate: careerRecord.isoDate,
@@ -551,7 +939,15 @@ async function startServer() {
           redirect: 'follow',
         });
         gasResponseText = await response.text();
-        gasSynced = response.ok;
+        try {
+          const parsed = JSON.parse(gasResponseText);
+          gasSynced =
+            parsed?.status === 'success' &&
+            (parsed?.targetSheet === 'Trang tính 5' ||
+              !String(parsed?.message || '').includes('Trang tính 2'));
+        } catch {
+          gasSynced = response.ok;
+        }
       } catch {
         // Keep local record even if external GAS call fails
       }
@@ -589,7 +985,7 @@ async function startServer() {
       await Promise.all([
         (async () => {
           try {
-            const targetUrl = `${cleanUrl}${sep}action=get_career_results&_t=${Date.now()}`;
+            const targetUrl = `${cleanUrl}${sep}action=get_career_results&sheet=5&_t=${Date.now()}`;
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 4500);
             const response = await fetch(targetUrl, {

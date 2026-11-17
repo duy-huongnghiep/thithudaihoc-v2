@@ -1,3 +1,32 @@
+export interface AdminPermissions {
+  lichsu: boolean;
+  ketquahuongnghiep: boolean;
+  danhsachtaikhoan: boolean;
+  cauhinh: boolean;
+  hanche: boolean;
+  danhsachdkytk?: string;
+}
+
+export interface RegistrationExamConfig {
+  enableHsa: boolean;
+  enableVact: boolean;
+  enableThptqg: boolean;
+  enableHuongnghiep: boolean;
+}
+
+export interface SheetGlobalConfig {
+  loadedFromSheet4: boolean;
+  enableHsa: boolean;
+  enableVact: boolean;
+  enableThptqg: boolean;
+  enableHuongnghiep: boolean;
+  registrationConfig?: RegistrationExamConfig;
+  batdau: string;
+  ketthuc: string;
+  thongbao: string;
+  examLinks: Record<string, string>;
+}
+
 export interface StudentInfo {
   username: string;
   password: string;
@@ -12,8 +41,11 @@ export interface StudentInfo {
   batdau?: string;
   ketthuc?: string;
   thongbao?: string;
+  registeredAt?: string;
+  sourceZone?: 'sheet3_manual' | 'sheet3_web' | 'sheet1';
   rowNumber?: number;
   isAdmin?: boolean;
+  adminPermissions?: AdminPermissions;
 }
 
 export interface LoginLogRecord {
@@ -107,7 +139,7 @@ export interface ExamGroup {
   sections: ExamSection[];
 }
 
-export type ActiveTab = 'login' | 'search' | 'dashboard' | 'guide' | 'admin-logs';
+export type ActiveTab = 'login' | 'register' | 'search' | 'career' | 'dashboard' | 'guide' | 'admin-logs';
 
 export interface ExamDetailInfo {
   id: 'hsa' | 'vact' | 'thptqg';

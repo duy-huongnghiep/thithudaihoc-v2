@@ -10,10 +10,8 @@ import {
   Compass,
   HelpCircle,
   ChevronRight,
-  ExternalLink,
   CheckCircle2,
-  AlertTriangle,
-  Sparkles,
+  Info,
 } from 'lucide-react';
 
 interface UserGuideModalProps {
@@ -25,6 +23,7 @@ interface UserGuideModalProps {
 
 export const UserGuideModal: React.FC<UserGuideModalProps> = ({
   onClose,
+  onGoToRegister,
   onGoToSearch,
   onGoToLogin,
 }) => {
@@ -34,24 +33,24 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
     {
       id: 1,
       badge: 'B1',
-      title: 'Đăng Ký Ca Thi Test',
+      title: 'Đăng Ký Tài Khoản',
       icon: PenTool,
-      color: 'amber',
-      shortDesc: 'Điền form đăng ký, chọn kỳ thi & mục Hướng nghiệp',
       content: {
-        heading: 'Bước 1: Đăng ký tham gia thi thử & định hướng',
+        heading: 'Bước 1: Đăng ký tài khoản thi thử trực tiếp trên Web',
         description:
-          'Để được cấp tài khoản, Số Báo Danh và quyền truy cập vào các đề thi thử, thí sinh cần điền vào biểu mẫu đăng ký chính thức của Ban tổ chức.',
+          'Thí sinh đăng ký tài khoản ngay trên cổng thi thử để được cấp Số Báo Danh (SBD) tự động và tham gia làm bài ngay lập tức.',
         bulletPoints: [
-          'Truy cập link Google Form đăng ký của Ban tổ chức.',
-          'Điền thông tin cá nhân: Họ và tên, Năm sinh, Email, Số điện thoại (SĐT chính là Tài khoản đăng nhập).',
-          'Chọn các kỳ thi bạn muốn tham gia: ĐGNL HSA (ĐHQGHN), ĐGNL VACT (ĐHQG-HCM), THPT Quốc Gia.',
-          'Đặc biệt: Chọn "Có" tại mục Hướng nghiệp nếu bạn muốn làm bài trắc nghiệm chọn ngành ĐH chuẩn Holland RIASEC.',
-          'Sau khi gửi form, dữ liệu sẽ tự động được đồng bộ vào hệ thống trong vòng vài phút.',
+          'Chuyển sang tab "Đăng ký" ngay trên màn hình chính.',
+          'Điền đầy đủ thông tin cá nhân: Số điện thoại (làm Tài khoản), Mật khẩu tự đặt, Họ và tên, Email, Năm sinh.',
+          'Tích chọn các kỳ thi đang mở đăng ký mà bạn muốn tham gia (ĐGNL HSA, V-ACT, THPT Quốc Gia, Hướng nghiệp).',
+          'Nhấn "Hoàn tất đăng ký tài khoản", hệ thống tự động cấp SBD 5 số và lưu dữ liệu lên hệ thống.',
+          'Sau khi đăng ký xong, nhấn "Đăng nhập ngay" để vào phòng thi!',
         ],
-        actionLabel: 'Mở Form Đăng Ký Google Form',
-        actionUrl: 'https://forms.gle/wMqrZrqWD4RL68Az8',
-        actionExternal: true,
+        actionLabel: 'Đăng Ký Tài Khoản Ngay',
+        actionCallback: () => {
+          onClose();
+          if (onGoToRegister) onGoToRegister();
+        },
       },
     },
     {
@@ -59,21 +58,15 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
       badge: 'B2',
       title: 'Tra Cứu Thông Tin',
       icon: Search,
-      color: 'blue',
-      shortDesc: 'Tìm Số Báo Danh, Tài khoản, Mật khẩu theo SĐT',
       content: {
         heading: 'Bước 2: Tra cứu thông tin dự thi và mật khẩu',
         description:
-          'Sau khi đã đăng ký trên form, bạn sử dụng công cụ tra cứu tích hợp sẵn trên website để nhận thông tin đăng nhập và kiểm tra phân quyền môn thi.',
+          'Sau khi đã đăng ký tài khoản hoặc được Ban tổ chức cấp tài khoản, bạn có thể tra cứu nhanh thông tin dự thi và kiểm tra môn thi.',
         bulletPoints: [
-          'Tại trang chủ, nhấn vào liên kết "Tra cứu thông tin dự thi tại đây".',
-          'Nhập Số điện thoại bạn đã dùng khi đăng ký (hoặc Số Báo Danh nếu đã biết).',
-          'Nhấn "Tra cứu ngay", hệ thống sẽ trích xuất ngay:',
-          '  • Số Báo Danh (SBD) chính thức',
-          '  • Tên đăng nhập và Mật khẩu thi trực tuyến',
-          '  • Các kỳ thi & mục Hướng nghiệp bạn đã được phân quyền',
-          '  • Thời gian bắt đầu và kết thúc ca thi (nếu có lịch hẹn)',
-          'Nhấn nút "Sao chép" để lưu nhanh mật khẩu, hoặc nhấn "Đăng nhập ngay với tài khoản này" để vào thẳng phòng thi!',
+          'Chọn tab "Tra cứu SBD" tại màn hình chính.',
+          'Nhập Số điện thoại bạn đã dùng khi đăng ký (hoặc Số Báo Danh).',
+          'Nhấn "Tra cứu ngay" để xem Số Báo Danh, Tên đăng nhập, Mật khẩu và các kỳ thi đã đăng ký.',
+          'Nhấn "Đăng nhập ngay với tài khoản này" để vào thẳng phòng thi!',
         ],
         actionLabel: 'Đến Trang Tra Cứu Ngay',
         actionCallback: () => {
@@ -87,19 +80,14 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
       badge: 'B3',
       title: 'Đăng Nhập Hệ Thống',
       icon: LogIn,
-      color: 'indigo',
-      shortDesc: 'Nhập TK & MK hoặc đăng nhập 1 chạm',
       content: {
         heading: 'Bước 3: Đăng nhập vào cổng thí sinh',
         description:
-          'Thí sinh sử dụng tài khoản và mật khẩu vừa tra cứu được để đăng nhập vào giao diện quản lý cá nhân.',
+          'Thí sinh sử dụng tài khoản và mật khẩu để đăng nhập vào giao diện phòng thi cá nhân.',
         bulletPoints: [
-          'Nhập Tài khoản (thường là Số điện thoại của bạn).',
-          'Nhập Mật khẩu được cấp trong bảng tra cứu.',
-          'Bấm biểu tượng con mắt để kiểm tra lại mật khẩu đã gõ chính xác chưa.',
-          'Bấm nút "Đăng Nhập" để truy cập vào Bảng điều khiển thí sinh cá nhân.',
-          'Gợi ý: Nếu dùng nút "Đăng nhập ngay" ở Bước 2, bạn không cần phải gõ lại mật khẩu!',
-          'Hệ thống tự động đồng bộ hóa phiên làm việc và bảo mật thông tin dự thi của bạn.',
+          'Nhập Tài khoản (Số điện thoại) và Mật khẩu đã đăng ký.',
+          'Bấm biểu tượng con mắt để kiểm tra lại mật khẩu nếu cần.',
+          'Bấm "Đăng Nhập" để truy cập phòng thi cá nhân.',
         ],
         actionLabel: 'Về Giao Diện Đăng Nhập',
         actionCallback: () => {
@@ -113,17 +101,14 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
       badge: 'B4',
       title: 'Đếm Ngược & Mở Đề',
       icon: Timer,
-      color: 'emerald',
-      shortDesc: 'Đồng hồ đếm ngược từng giây đến giờ thi',
       content: {
         heading: 'Bước 4: Theo dõi lịch thi & Đồng hồ đếm ngược',
         description:
-          'Hệ thống tích hợp đồng hồ đếm ngược thông minh đến từng giây (`00:00:00`) giúp bạn chủ động thời gian.',
+          'Hệ thống tích hợp đồng hồ đếm ngược thông minh từng giây khi Ban tổ chức cấu hình lịch ca thi.',
         bulletPoints: [
-          'Chế độ có lịch thi (Ấn định ngày giờ): Đồng hồ đếm ngược từng giây đến thời điểm mở đề. Đúng giờ hẹn, phòng thi sẽ tự động mở khóa!',
-          'Chế độ Thi tự do (Ban tổ chức nhập số 0): Khi bắt đầu và kết thúc là số 0, toàn bộ thông báo ca thi và hạn chế sẽ được ẩn đi. Bạn được vào làm bài bất cứ lúc nào!',
-          'Thời gian làm bài: Mỗi môn thi có quy định thời gian làm bài riêng biệt (Toán, Văn, Lý, Hóa, Sinh, Tiếng Anh...).',
-          'Khi hết thời gian ca thi quy định, hệ thống sẽ tự động khóa bài để đảm bảo tính công bằng.',
+          'Chế độ có lịch thi: Đồng hồ đếm ngược đến giờ mở đề. Đúng giờ hẹn phòng thi sẽ tự động mở khóa.',
+          'Chế độ Thi tự do: Khi không giới hạn giờ, bạn có thể vào làm bài bất cứ lúc nào.',
+          'Mỗi môn thi có thời lượng quy định riêng biệt.',
         ],
       },
     },
@@ -132,19 +117,14 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
       badge: 'B5',
       title: 'Vào Thi Trực Tuyến',
       icon: PlayCircle,
-      color: 'teal',
-      shortDesc: 'Chọn môn thi, làm bài trắc nghiệm & xem điểm',
       content: {
         heading: 'Bước 5: Bắt đầu làm bài thi trắc nghiệm',
         description:
-          'Sau khi phòng thi mở, bạn có thể lựa chọn các bài thi trong phạm vi đã đăng ký để bắt đầu làm bài.',
+          'Sau khi phòng thi mở, chọn các môn thi trong phạm vi đã đăng ký để bắt đầu làm bài.',
         bulletPoints: [
-          'Nhấn nút "Bắt Đầu Làm Bài Thi" tại giao diện chính.',
-          'Hệ thống hiển thị danh sách các môn thi bạn được phép thi (HSA / VACT / THPTQG).',
-          'Bấm vào môn thi bạn muốn làm, đọc kỹ quy chế phòng thi và thời gian làm bài.',
-          'Nhấn "Mở Đề & Bắt Đầu Thi" để chuyển tới phòng thi trắc nghiệm trực tuyến.',
-          'Làm bài cẩn thận, không chuyển đổi tab liên tục để tránh vi phạm quy chế.',
-          'Nhấn "Nộp bài" sau khi hoàn thành để nhận ngay điểm số và lời giải chi tiết!',
+          'Chọn kỳ thi (HSA / V-ACT / THPTQG) và phần thi muốn làm.',
+          'Đọc kỹ quy chế và nhấn "Mở Đề & Bắt Đầu Thi".',
+          'Nhấn Nộp bài sau khi hoàn thành để xem điểm và lời giải chi tiết.',
         ],
       },
     },
@@ -153,17 +133,14 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
       badge: 'B6',
       title: 'Test Hướng Nghiệp',
       icon: Compass,
-      color: 'fuchsia',
-      shortDesc: 'Làm bài test 18 câu RIASEC trực tiếp trên web',
       content: {
         heading: 'Bước 6: Trắc nghiệm hướng nghiệp RIASEC trực tiếp trên web',
         description:
-          'Dành cho các thí sinh có tích chọn mục Hướng nghiệp khi đăng ký. Làm trực tiếp ngay trên web để khám phá nhóm tính cách và ngành học phù hợp.',
+          'Làm bài test 18 câu RIASEC ngay ngoài trang chủ hoặc trong phòng thi để khám phá nhóm tính cách, ngành học và tổ hợp THPTQG phù hợp.',
         bulletPoints: [
-          'Tại trang cá nhân, bạn sẽ thấy thẻ "Định Hướng Nghề Nghiệp (18 câu RIASEC)".',
-          'Nhấn nút "Làm Bài Test Hướng Nghiệp Trực Tiếp" để mở bảng khảo sát ngay trên web.',
-          'Trả lời lần lượt 18 câu hỏi đánh giá mức độ phù hợp với bản thân.',
-          'Bấm "Xem Kết Quả Định Hướng" để nhận phân tích nhóm tính cách RIASEC, top ngành học và trường ĐH đề xuất.',
+          'Nhấn "Vào làm bài test Hướng nghiệp" ngay trang chủ (nhập nhanh thông tin) hoặc trong phòng thi.',
+          'Trả lời lần lượt 18 câu hỏi đánh giá sở thích.',
+          'Bấm "Xem Kết Quả Định Hướng" để nhận phân tích RIASEC, ngành học, trường ĐH và tổ hợp THPTQG.',
         ],
       },
     },
@@ -172,18 +149,14 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
       badge: 'B7',
       title: 'Lưu Ý & Hỗ Trợ',
       icon: HelpCircle,
-      color: 'purple',
-      shortDesc: 'Làm mới dữ liệu, quên mật khẩu & hotline hỗ trợ',
       content: {
         heading: 'Bước 7: Hỗ trợ kỹ thuật & Các lưu ý quan trọng',
         description:
           'Giải quyết các tình huống thường gặp khi sử dụng cổng thông tin thi thử.',
         bulletPoints: [
-          'Vừa đăng ký form xong? Hệ thống tự động đồng bộ tức thì, bạn có thể tra cứu hoặc đăng nhập ngay lập tức mà không cần phải tải lại trang web!',
-          'Bạn cũng có thể bấm biểu tượng xoay (Làm mới) ở góc trên bên phải bất cứ lúc nào để chủ động cập nhật dữ liệu mới nhất.',
-          'Quên mật khẩu hoặc nhập sai SĐT? Liên hệ ngay Fanpage hoặc Hotline của Ban tổ chức để được hỗ trợ cấp lại.',
-          'Thiết bị khuyến nghị: Máy tính để bàn, laptop hoặc máy tính bảng màn hình lớn để có trải nghiệm đọc đề tốt nhất.',
-          'Đường truyền internet: Đảm bảo kết nối mạng ổn định trong suốt thời gian làm bài.',
+          'Bạn có thể bấm nút Đồng bộ (Làm mới) ở góc trên bên phải bất cứ lúc nào để cập nhật dữ liệu mới nhất.',
+          'Quên mật khẩu? Dùng tab "Tra cứu SBD" hoặc liên hệ Ban tổ chức qua Facebook hỗ trợ ở cuối trang.',
+          'Đảm bảo kết nối mạng ổn định trong suốt thời gian làm bài.',
         ],
       },
     },
@@ -194,26 +167,26 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
   return (
     <div
       id="user-guide-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-sm animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-black/85 backdrop-blur-xs animate-fadeIn"
       onClick={onClose}
     >
       <div
         id="user-guide-modal"
-        className="w-full max-w-2xl bg-[#121629] border border-blue-500/30 rounded-3xl p-5 sm:p-7 shadow-2xl space-y-4 text-slate-200 relative max-h-[90vh] flex flex-col"
+        className="w-full max-w-2xl bg-[#111526] border border-blue-500/30 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 text-slate-200 relative max-h-[92dvh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3.5 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/25">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shrink-0">
               <BookOpen className="w-5 h-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <span className="text-[10px] text-blue-400 uppercase font-bold tracking-wider block">
-                Cẩm nang toàn tập
+                Cẩm nang sử dụng
               </span>
-              <h2 className="text-base sm:text-lg font-extrabold text-white">
-                Hướng Dẫn Sử Dụng Cổng Thi Thử
+              <h2 className="text-sm sm:text-lg font-extrabold text-white truncate">
+                Hướng Dẫn Cổng Thi Thử (B1 – B7)
               </h2>
             </div>
           </div>
@@ -221,15 +194,15 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white transition p-1.5 rounded-xl hover:bg-slate-800 cursor-pointer"
+            className="min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-xl hover:bg-slate-800 cursor-pointer shrink-0"
             title="Đóng hướng dẫn"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Step Navigation Bar (Scrollable on small screens) */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0 scrollbar-none border-b border-slate-800/60">
+        {/* Step Navigation Bar */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 shrink-0 border-b border-slate-800/60">
           {steps.map((s) => {
             const Icon = s.icon;
             const isActive = s.id === activeStep;
@@ -238,19 +211,13 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 key={s.id}
                 type="button"
                 onClick={() => setActiveStep(s.id)}
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                className={`min-h-[42px] px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
                   isActive
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 border border-blue-400/40'
-                    : 'bg-[#0b0e1a] text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-[#080b16] text-slate-400 hover:text-slate-200 border border-slate-800'
                 }`}
               >
-                <span
-                  className={`w-5 h-5 rounded-lg flex items-center justify-center text-[10px] font-mono font-black ${
-                    isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-blue-400'
-                  }`}
-                >
-                  {s.badge}
-                </span>
+                <span className="font-mono text-[11px]">{s.badge}</span>
                 <span className="hidden sm:inline">{s.title}</span>
                 <Icon className="w-3.5 h-3.5 sm:hidden" />
               </button>
@@ -258,113 +225,85 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           })}
         </div>
 
-        {/* Step Detail Content (Scrollable) */}
+        {/* Step Detail Content */}
         <div className="overflow-y-auto pr-1 space-y-4 flex-1 text-xs">
-          <div className="p-4 rounded-2xl bg-[#0b0e1a] border border-slate-800/90 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded-md font-mono font-bold text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                  {currentStepData.badge}
-                </span>
-                <h3 className="text-sm font-bold text-white">
-                  {currentStepData.content.heading}
-                </h3>
-              </div>
-              <span className="text-[11px] text-slate-500">
-                {currentStepData.id} / {steps.length}
+          <div className="p-4 rounded-2xl bg-[#080b16] border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 gap-2">
+              <h3 className="text-sm font-bold text-white">
+                {currentStepData.content.heading}
+              </h3>
+              <span className="text-[11px] text-slate-400 font-mono tabular-nums shrink-0">
+                {currentStepData.id}/{steps.length}
               </span>
             </div>
 
-            <p className="text-slate-300 leading-relaxed text-xs">
+            <p className="text-slate-300 leading-relaxed">
               {currentStepData.content.description}
             </p>
 
-            {/* Bullet Points */}
             <div className="space-y-2 pt-1">
               {currentStepData.content.bulletPoints.map((point, idx) => (
-                <div key={idx} className="flex items-start gap-2 text-slate-300 leading-normal">
+                <div key={idx} className="flex items-start gap-2 text-slate-300 leading-relaxed">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  <span className="font-sans">{point}</span>
+                  <span>{point}</span>
                 </div>
               ))}
             </div>
 
-            {/* Step Action Button if available */}
-            {currentStepData.content.actionLabel && (
+            {currentStepData.content.actionLabel && currentStepData.content.actionCallback && (
               <div className="pt-2">
-                {currentStepData.content.actionUrl ? (
-                  <a
-                    href={currentStepData.content.actionUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold rounded-xl text-xs transition shadow-md shadow-amber-500/20 cursor-pointer"
-                  >
-                    <span>{currentStepData.content.actionLabel}</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                ) : currentStepData.content.actionCallback ? (
-                  <button
-                    type="button"
-                    onClick={currentStepData.content.actionCallback}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl text-xs transition shadow-md shadow-blue-600/20 cursor-pointer"
-                  >
-                    <span>{currentStepData.content.actionLabel}</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={currentStepData.content.actionCallback}
+                  className="min-h-[42px] inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  <span>{currentStepData.content.actionLabel}</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             )}
           </div>
 
-          {/* Quick Tips Box */}
           <div className="p-3 bg-blue-950/20 border border-blue-500/25 rounded-xl flex items-start gap-2.5 text-blue-200">
-            <Sparkles className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+            <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
             <div className="text-[11px] leading-relaxed">
-              <strong>Mẹo hay:</strong> Bạn có thể theo dõi tiến độ thi và làm lại đề thi trong suốt khoảng thời gian mở ca thi. Nếu có bất kỳ thắc mắc nào, hãy nhấn nút làm mới hoặc liên hệ ngay ban quản trị!
+              <strong>Mẹo hay:</strong> Bạn có thể theo dõi tiến độ thi và làm lại đề thi trong suốt khoảng thời gian mở ca thi.
             </div>
           </div>
         </div>
 
-        {/* Modal Footer Controls */}
-        <div className="pt-2 border-t border-slate-800 flex items-center justify-between shrink-0">
+        {/* Footer Controls */}
+        <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0">
           <button
             type="button"
             disabled={activeStep === 1}
             onClick={() => setActiveStep((curr) => Math.max(1, curr - 1))}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             ← Bước trước
           </button>
 
-          <div className="flex items-center gap-1.5">
-            {steps.map((s) => (
-              <span
-                key={s.id}
-                onClick={() => setActiveStep(s.id)}
-                className={`w-2 h-2 rounded-full cursor-pointer transition-all ${
-                  s.id === activeStep ? 'w-5 bg-blue-500' : 'bg-slate-700 hover:bg-slate-500'
-                }`}
-              />
-            ))}
-          </div>
+          <span className="text-[11px] font-mono tabular-nums text-slate-400">
+            Bước {activeStep} / {steps.length}
+          </span>
 
           {activeStep < steps.length ? (
             <button
               type="button"
               onClick={() => setActiveStep((curr) => Math.min(steps.length, curr + 1))}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition shadow-md shadow-blue-600/20 flex items-center gap-1 cursor-pointer"
+              className="min-h-[42px] px-4 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition flex items-center gap-1 cursor-pointer"
             >
-              <span>Bước tiếp theo</span>
-              <ChevronRight className="w-3.5 h-3.5" />
+              <span>Tiếp theo</span>
+              <ChevronRight className="w-4 h-4" />
             </button>
           ) : (
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition shadow-md shadow-emerald-400/20 flex items-center gap-1 cursor-pointer"
+              className="min-h-[42px] px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition flex items-center gap-1.5 cursor-pointer"
             >
-              <span>Đã hiểu, Bắt đầu</span>
-              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Đã hiểu</span>
+              <CheckCircle2 className="w-4 h-4" />
             </button>
           )}
         </div>
