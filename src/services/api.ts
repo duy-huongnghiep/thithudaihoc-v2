@@ -775,20 +775,71 @@ function applySheet4Data(sheet4Payload: any): boolean {
   return true;
 }
 
+async function fetchJsonWithWarmupRetry(
+  url: string,
+  init: RequestInit,
+  retries = 2,
+  timeoutMs = 18000
+): Promise<{ res: Response; json: any | null }> {
+  let lastRes: Response | null = null;
+  let lastJson: any | null = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const text = await res.text();
+      let json: any | null = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        json = null;
+      }
+
+      lastRes = res;
+      lastJson = json;
+
+      const isTransientGateway =
+        res.status === 502 ||
+        res.status === 503 ||
+        res.status === 504 ||
+        (json === null && (text.includes('warmup') || text.includes('<!DOCTYPE') || text.includes('<html')));
+
+      if (!isTransientGateway || attempt === retries) {
+        return { res, json };
+      }
+    } catch (err) {
+      clearTimeout(timer);
+      if (attempt === retries) {
+        throw err;
+      }
+    }
+
+    await new Promise((r) => setTimeout(r, 1200 + attempt * 600));
+  }
+
+  return { res: lastRes as Response, json: lastJson };
+}
+
 async function fetchSheet4FromNetwork(currentUrl: string, forceRefresh = false): Promise<boolean> {
   try {
     const proxyUrl = `/api/sheet4-data?url=${encodeURIComponent(currentUrl)}${forceRefresh ? `&_t=${Date.now()}` : ''}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 14000);
-    const res = await fetch(proxyUrl, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    if (res.ok) {
-      const payload = await res.json();
-      if (applySheet4Data(payload)) return true;
+    const { res, json } = await fetchJsonWithWarmupRetry(
+      proxyUrl,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      },
+      2,
+      14000
+    );
+    if (res.ok && json && applySheet4Data(json)) {
+      return true;
     }
   } catch {
     // ignore
@@ -798,20 +849,27 @@ async function fetchSheet4FromNetwork(currentUrl: string, forceRefresh = false):
 
 export async function refreshSystemCache(): Promise<void> {
   const currentUrl = getScriptUrl();
-  const res = await fetch('/api/refresh-cache', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
+  const { res, json } = await fetchJsonWithWarmupRetry(
+    '/api/refresh-cache',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ scriptUrl: currentUrl }),
     },
-    body: JSON.stringify({ scriptUrl: currentUrl }),
-  });
-  const json = await res.json().catch(() => null);
+    2,
+    20000
+  );
   if (json?.sheet4) {
     applySheet4Data(json.sheet4);
   }
   if (!res.ok || !json?.success) {
-    throw new Error(json?.message || 'Không thể đồng bộ dữ liệu từ Google Sheets.');
+    throw new Error(
+      json?.message ||
+        `Không thể đồng bộ dữ liệu từ máy chủ (HTTP ${res.status}). Vui lòng thử lại.`
+    );
   }
   if (inMemoryAuthToken) {
     await getStudentsData(true);
@@ -877,25 +935,31 @@ export async function searchStudentByPhoneOrUser(query: string): Promise<Student
   const trimmed = query.trim();
   if (!trimmed) return null;
 
-  const res = await fetch('/api/search-student', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
+  const { res, json } = await fetchJsonWithWarmupRetry(
+    '/api/search-student',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        query: trimmed,
+        scriptUrl: getScriptUrl(),
+      }),
     },
-    body: JSON.stringify({
-      query: trimmed,
-      scriptUrl: getScriptUrl(),
-    }),
-  });
-
-  const json = await res.json().catch(() => null);
+    2,
+    20000
+  );
 
   if (res.status === 429) {
     throw new Error(json?.message || 'Bạn tra cứu quá nhanh. Vui lòng đợi một chút rồi thử lại.');
   }
   if (!res.ok || !json) {
-    throw new Error(json?.message || 'Không thể kết nối máy chủ tra cứu. Vui lòng thử lại.');
+    throw new Error(
+      json?.message ||
+        `Không thể kết nối máy chủ tra cứu (HTTP ${res.status}). Vui lòng thử lại.`
+    );
   }
 
   if (!json.found || !json.student) {
@@ -906,23 +970,28 @@ export async function searchStudentByPhoneOrUser(query: string): Promise<Student
 }
 
 export async function authenticateStudent(user: string, pass: string): Promise<StudentInfo | null> {
-  const res = await fetch('/api/auth/login', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
+  const { res, json } = await fetchJsonWithWarmupRetry(
+    '/api/auth/login',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        username: user.trim(),
+        password: pass.trim(),
+        scriptUrl: getScriptUrl(),
+      }),
     },
-    body: JSON.stringify({
-      username: user.trim(),
-      password: pass.trim(),
-      scriptUrl: getScriptUrl(),
-    }),
-  });
-
-  const json = await res.json().catch(() => null);
+    2,
+    20000
+  );
 
   if (!json) {
-    throw new Error('Không nhận được phản hồi hợp lệ từ máy chủ xác thực. Vui lòng thử lại.');
+    throw new Error(
+      `Máy chủ xác thực đang khởi động hoặc tạm gián đoạn (HTTP ${res.status}). Vui lòng thử lại sau vài giây.`
+    );
   }
 
   if (res.status === 429 || res.status >= 500) {

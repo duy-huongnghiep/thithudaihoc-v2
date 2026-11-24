@@ -631,8 +631,8 @@ async function startServer() {
 
   const fetchTextWithRetry = async (
     targetUrl: string,
-    attempts = 2,
-    timeoutMs = 15000
+    attempts = 3,
+    timeoutMs = 12000
   ): Promise<string | null> => {
     for (let i = 0; i < attempts; i++) {
       const controller = new AbortController();
@@ -659,7 +659,7 @@ async function startServer() {
         clearTimeout(timeout);
       }
       if (i < attempts - 1) {
-        await new Promise((r) => setTimeout(r, 350));
+        await new Promise((r) => setTimeout(r, 350 * (i + 1)));
       }
     }
     return null;
@@ -999,13 +999,13 @@ async function startServer() {
         return res.json({ success: true, token, student: safeStudent, sheet4Public });
       }
 
-      // If upstream GAS completely failed AND we have no cached data at all, report 503 instead of 401
+      // If upstream GAS completely failed AND we have no cached data at all, report 500 (not 503, which nginx intercepts)
       if (
         !effectiveRoster.remoteOk &&
         serverCachedStudents.length === 0 &&
         serverCachedSheet4Admins.length === 0
       ) {
-        return res.status(503).json({
+        return res.status(500).json({
           success: false,
           message: 'Không thể kết nối tới Google Sheets lúc này. Vui lòng bấm Đồng bộ hoặc thử lại sau vài giây.',
         });
@@ -1090,7 +1090,7 @@ async function startServer() {
 
       if (!found) {
         if (!rosterResult.remoteOk && serverCachedStudents.length === 0) {
-          return res.status(503).json({
+          return res.status(500).json({
             found: false,
             student: null,
             message: 'Không thể kết nối tới Google Sheets lúc này. Vui lòng bấm Đồng bộ hoặc thử lại sau vài giây.',
@@ -1125,7 +1125,7 @@ async function startServer() {
         fetchStudentsWithStatus(cleanUrl, true),
       ]);
       const ok = Boolean(sheet4Data) || roster.remoteOk;
-      return res.status(ok ? 200 : 503).json({
+      return res.status(ok ? 200 : 500).json({
         success: ok,
         sheet4: buildPublicSheet4Payload(sheet4Data),
         message: ok
@@ -1893,6 +1893,26 @@ async function startServer() {
     res.json({ status: 'ok', timestamp: Date.now() });
   });
 
+  const warmUpGasCaches = async () => {
+    try {
+      await Promise.all([
+        fetchSheet4Raw(GOOGLE_SCRIPT_URL, true),
+        fetchStudentsWithStatus(GOOGLE_SCRIPT_URL, true),
+      ]);
+      if (serverCachedStudents.length === 0 || !serverCachedSheet4Data) {
+        setTimeout(() => {
+          fetchSheet4Raw(GOOGLE_SCRIPT_URL, true).catch(() => {});
+          fetchStudentsWithStatus(GOOGLE_SCRIPT_URL, true).catch(() => {});
+        }, 4000);
+      }
+    } catch {
+      // ignore warmup failure
+    }
+  };
+
+  // Start warming GAS caches immediately in parallel with Vite setup
+  warmUpGasCaches();
+
   // In production serve pre-built dist/, in development dynamically load Vite middlewares
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static('dist'));
@@ -1908,22 +1928,9 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  const warmUpGasCaches = async () => {
-    try {
-      await Promise.all([
-        fetchSheet4Raw(GOOGLE_SCRIPT_URL, true),
-        fetchStudentsWithStatus(GOOGLE_SCRIPT_URL, true),
-      ]);
-    } catch {
-      // ignore warmup failure
-    }
-  };
-
   const server = http.createServer(app);
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);
-    // Pre-warm Trang tính 4 & Trang tính 3/1 caches immediately & keep refreshed periodically
-    warmUpGasCaches();
     setInterval(() => {
       warmUpGasCaches();
     }, 120 * 1000);
