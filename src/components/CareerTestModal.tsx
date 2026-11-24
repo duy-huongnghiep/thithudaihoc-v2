@@ -434,20 +434,20 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
   return (
     <div
       id="career-test-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-black/85 backdrop-blur-xs animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-black/80 backdrop-blur-sm animate-fadeIn"
       onClick={onClose}
     >
       <div
         id="career-test-modal-content"
-        className="w-full max-w-2xl bg-[#111526] border border-fuchsia-500/35 rounded-2xl sm:rounded-3xl shadow-2xl text-slate-200 relative max-h-[92dvh] flex flex-col overflow-hidden"
+        className="w-full max-w-2xl bg-[#0e1120] border border-fuchsia-500/35 rounded-3xl shadow-2xl text-slate-200 relative max-h-[92dvh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Sticky Modal Header */}
-        <div className="p-4 sm:p-6 border-b border-slate-800 shrink-0 relative pr-14 bg-[#111526]">
+        <div className="p-4 sm:p-6 border-b border-slate-800 shrink-0 relative pr-14 bg-[#0c1020]">
           <button
             type="button"
             onClick={onClose}
-            className="absolute right-3 top-3 min-w-[42px] min-h-[42px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-xl bg-slate-800/70 hover:bg-slate-800 cursor-pointer"
+            className="absolute right-3.5 top-3.5 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-xl hover:bg-slate-800 cursor-pointer"
             title="Đóng cửa sổ"
           >
             <X className="w-5 h-5" />
@@ -455,10 +455,10 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
 
           <div className="flex items-center gap-2 text-fuchsia-400 text-[11px] font-bold uppercase tracking-wider mb-1">
             <Compass className="w-4 h-4 shrink-0" />
-            <span>Trắc nghiệm hướng nghiệp (Holland RIASEC)</span>
+            <span>Trắc nghiệm Hướng nghiệp (Holland RIASEC)</span>
           </div>
-          <h2 className="text-base sm:text-xl font-bold text-white leading-snug">
-            Khám phá năng lực &amp; ngành học phù hợp
+          <h2 className="text-base sm:text-xl font-extrabold text-white leading-snug">
+            Khám phá Năng lực &amp; Ngành học Phù hợp
           </h2>
           <p className="text-xs text-slate-400 mt-1 leading-relaxed">
             {step === 'info' ? (
@@ -474,16 +474,16 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
 
           {/* Compact Progress Bar when in Test Step */}
           {step === 'test' && (
-            <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-1.5">
+            <div className="mt-3 pt-2.5 border-t border-slate-800 space-y-1.5">
               <div className="flex justify-between text-xs text-slate-400">
                 <span>Tiến độ hoàn thành</span>
                 <span className="font-mono tabular-nums font-bold text-fuchsia-400">
                   {answeredCount} / {QUESTIONS.length} câu ({Math.round((answeredCount / QUESTIONS.length) * 100)}%)
                 </span>
               </div>
-              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div className="w-full h-2 bg-[#080b16] rounded-full overflow-hidden border border-slate-800">
                 <div
-                  className="h-full bg-fuchsia-500 transition-all duration-300"
+                  className="h-full bg-gradient-to-r from-fuchsia-500 to-purple-500 transition-all duration-300"
                   style={{ width: `${(answeredCount / QUESTIONS.length) * 100}%` }}
                 />
               </div>
@@ -499,7 +499,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                 <div>
                   <label
                     htmlFor="career-guest-hoten"
-                    className="block text-xs font-semibold text-slate-300 mb-1.5"
+                    className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
                   >
                     Họ và tên <span className="text-rose-400">*</span>
                   </label>
@@ -514,8 +514,8 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                         setGuestHoten(e.target.value);
                         if (infoError) setInfoError(null);
                       }}
-                      placeholder="VD: Nguyễn Văn An"
-                      className="w-full min-h-[46px] pl-10 pr-3 py-2.5 bg-[#080b16] border border-slate-800 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600"
+                      placeholder="Nguyễn Văn An"
+                      className="w-full min-h-[44px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 transition"
                     />
                   </div>
                 </div>
@@ -523,7 +523,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                 <div>
                   <label
                     htmlFor="career-guest-phone"
-                    className="block text-xs font-semibold text-slate-300 mb-1.5"
+                    className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
                   >
                     Số điện thoại <span className="text-rose-400">*</span>
                   </label>
@@ -538,8 +538,8 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                         setGuestPhone(e.target.value);
                         if (infoError) setInfoError(null);
                       }}
-                      placeholder="VD: 0912345678"
-                      className="w-full min-h-[46px] pl-10 pr-3 py-2.5 bg-[#080b16] border border-slate-800 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono tabular-nums"
+                      placeholder="0912345678"
+                      className="w-full min-h-[44px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono tabular-nums transition"
                     />
                   </div>
                 </div>
@@ -549,7 +549,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                 <div>
                   <label
                     htmlFor="career-guest-namsinh"
-                    className="block text-xs font-semibold text-slate-300 mb-1.5"
+                    className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
                   >
                     Năm sinh <span className="text-rose-400">*</span>
                   </label>
@@ -565,14 +565,14 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                       if (infoError) setInfoError(null);
                     }}
                     placeholder="2009"
-                    className="w-full min-h-[46px] px-3.5 py-2.5 bg-[#080b16] border border-slate-800 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono tabular-nums"
+                    className="w-full min-h-[44px] px-3.5 py-2 bg-[#080b16] border border-slate-700/80 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono tabular-nums transition"
                   />
                 </div>
 
                 <div>
                   <label
                     htmlFor="career-guest-email"
-                    className="block text-xs font-semibold text-slate-300 mb-1.5"
+                    className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
                   >
                     Email (nếu có)
                   </label>
@@ -587,7 +587,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                         if (infoError) setInfoError(null);
                       }}
                       placeholder="name@gmail.com"
-                      className="w-full min-h-[46px] pl-10 pr-3 py-2.5 bg-[#080b16] border border-slate-800 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600"
+                      className="w-full min-h-[44px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 transition"
                     />
                   </div>
                 </div>
@@ -595,7 +595,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                 <div>
                   <label
                     htmlFor="career-guest-sbd"
-                    className="block text-xs font-semibold text-slate-300 mb-1.5"
+                    className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
                   >
                     Số báo danh (nếu có)
                   </label>
@@ -607,56 +607,56 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                       value={guestSbd}
                       onChange={(e) => setGuestSbd(e.target.value)}
                       placeholder="Không bắt buộc"
-                      className="w-full min-h-[46px] pl-10 pr-3 py-2.5 bg-[#080b16] border border-slate-800 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono"
+                      className="w-full min-h-[44px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 focus:border-fuchsia-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono transition"
                     />
                   </div>
                 </div>
               </div>
 
               {infoError && (
-                <div className="flex items-start gap-2 text-rose-300 text-xs bg-rose-500/10 border border-rose-500/25 p-3 rounded-xl">
+                <div className="flex items-start gap-2 text-rose-300 text-xs bg-rose-950/50 border border-rose-500/35 p-3 rounded-xl">
                   <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                   <span>{infoError}</span>
                 </div>
               )}
 
-              <div className="pt-2 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5 border-t border-slate-800">
+              <div className="pt-3 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="min-h-[44px] py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer"
+                  className="min-h-[42px] py-2 px-4 rounded-xl bg-[#14182b] hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
                 >
                   Quay lại
                 </button>
                 <button
                   type="submit"
                   id="btn-career-start-test"
-                  className="min-h-[46px] py-2.5 px-6 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold rounded-xl transition text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer"
+                  className="min-h-[44px] py-2 px-5 bg-gradient-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 text-white font-bold rounded-xl shadow-lg shadow-fuchsia-600/25 transition text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <span>Bắt Đầu Làm Bài (18 Câu)</span>
+                  <span>Bắt đầu làm bài (18 câu)</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </form>
           ) : step === 'test' ? (
-            <div className="space-y-3.5">
+            <div className="space-y-3">
               {QUESTIONS.map((q, idx) => {
                 const currentVal = answers[q.id];
                 return (
                   <div
                     key={q.id}
-                    className={`p-3.5 sm:p-4 rounded-2xl border transition-colors ${
+                    className={`p-3.5 sm:p-4 rounded-2xl border transition ${
                       currentVal !== undefined
-                        ? 'bg-[#141730] border-fuchsia-500/35'
+                        ? 'bg-[#141129] border-fuchsia-500/45'
                         : 'bg-[#080b16] border-slate-800'
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      <span className="text-xs font-mono tabular-nums font-bold text-fuchsia-400 shrink-0 mt-0.5">
+                      <span className="text-xs font-mono tabular-nums font-extrabold text-fuchsia-400 shrink-0 mt-0.5">
                         {String(idx + 1).padStart(2, '0')}.
                       </span>
                       <div className="flex-1 space-y-2.5">
-                        <p className="text-xs sm:text-sm font-medium text-slate-100 leading-snug">
+                        <p className="text-xs sm:text-sm font-semibold text-slate-100 leading-snug">
                           {q.question}
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -671,14 +671,14 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                                 key={opt.score}
                                 type="button"
                                 onClick={() => handleSelectAnswer(q.id, opt.score)}
-                                className={`min-h-[44px] py-2 px-3 rounded-xl text-xs font-semibold transition border text-center cursor-pointer ${
+                                className={`min-h-[42px] py-2 px-3 rounded-xl text-xs font-semibold transition border text-center cursor-pointer ${
                                   isSelected
                                     ? opt.score === 2
-                                      ? 'bg-fuchsia-600 text-white border-fuchsia-400'
+                                      ? 'bg-fuchsia-600 text-white border-fuchsia-400 shadow-md shadow-fuchsia-600/25'
                                       : opt.score === 1
-                                      ? 'bg-indigo-600 text-white border-indigo-400'
+                                      ? 'bg-purple-700/70 text-white border-purple-400/60'
                                       : 'bg-slate-700 text-white border-slate-500'
-                                    : 'bg-[#0d1122] border-slate-800 text-slate-300 hover:border-slate-600'
+                                    : 'bg-[#0e1120] border-slate-800 text-slate-300 hover:border-slate-600'
                                 }`}
                               >
                                 {opt.label}
@@ -695,7 +695,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
               <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <span className="text-xs text-slate-400">
                   {isComplete
-                    ? 'Bạn đã hoàn thành toàn bộ 18 câu hỏi.'
+                    ? '✓ Bạn đã hoàn thành toàn bộ 18 câu hỏi.'
                     : `Còn ${QUESTIONS.length - answeredCount} câu chưa chọn.`}
                 </span>
 
@@ -704,7 +704,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                   id="btn-submit-career-test"
                   disabled={!isComplete || isSaving}
                   onClick={handleSubmitTest}
-                  className="min-h-[46px] py-2.5 px-6 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold rounded-xl transition text-xs sm:text-sm flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  className="min-h-[44px] py-2 px-5 bg-gradient-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 text-white font-bold rounded-xl shadow-lg shadow-fuchsia-600/25 transition text-xs sm:text-sm flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isSaving ? (
                     <>
@@ -713,7 +713,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                     </>
                   ) : (
                     <>
-                      <span>Xem Kết Quả Định Hướng</span>
+                      <span>Xem kết quả định hướng</span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}
@@ -723,12 +723,12 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
           ) : (
             <div className="space-y-4 animate-fadeIn">
               {/* Top Match */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-[#16122c] border border-fuchsia-500/35 space-y-2.5">
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#161029] to-[#0c1020] border border-fuchsia-500/35 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-fuchsia-300 uppercase tracking-wider">
-                    Mã tính cách nghề nghiệp
+                  <span className="text-[11px] uppercase font-bold tracking-wider text-fuchsia-300">
+                    Mã tính cách nghề nghiệp RIASEC
                   </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-fuchsia-500/20 text-fuchsia-200 font-mono font-bold text-sm border border-fuchsia-500/35">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-fuchsia-500/20 border border-fuchsia-500/40 text-fuchsia-200 font-mono font-extrabold text-sm">
                     {primaryTrait}
                     {secondaryTrait}
                     {tertiaryTrait}
@@ -736,7 +736,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                 </div>
 
                 <div>
-                  <h3 className="text-base sm:text-xl font-bold text-white">
+                  <h3 className="text-base sm:text-xl font-extrabold text-white">
                     {primaryInfo.fullName} &amp; {secondaryInfo.fullName}
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-300 mt-1.5 leading-relaxed">
@@ -746,9 +746,9 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
               </div>
 
               {/* Score Bars */}
-              <div className="bg-[#080b16] p-4 rounded-2xl border border-slate-800 space-y-3">
-                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <Layers className="w-4 h-4 text-indigo-400" />
+              <div className="bg-[#0a0d1c] p-4 rounded-2xl border border-slate-800 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-fuchsia-400" />
                   <span>Điểm số 6 nhóm RIASEC</span>
                 </h4>
 
@@ -768,7 +768,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                             {score}/{maxPossible} ({percent}%)
                           </span>
                         </div>
-                        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div className="w-full h-2 bg-[#141930] rounded-full overflow-hidden">
                           <div
                             className={`h-full bg-gradient-to-r ${info.color} transition-all duration-500`}
                             style={{ width: `${percent}%` }}
@@ -780,21 +780,21 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                 </div>
               </div>
 
-              {/* Majors */}
-              <div className="bg-[#080b16] p-4 rounded-2xl border border-slate-800 space-y-3">
-                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              {/* Majors (Keep Tuyển sinh 2027) */}
+              <div className="bg-[#0a0d1c] p-4 rounded-2xl border border-slate-800 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
                   <Briefcase className="w-4 h-4 text-emerald-400" />
-                  <span>Ngành học Đại học phù hợp (Tuyển sinh 2027)</span>
+                  <span>NGÀNH HỌC ĐẠI HỌC PHÙ HỢP (TUYỂN SINH 2027)</span>
                 </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {[...primaryInfo.majors.slice(0, 3), ...secondaryInfo.majors.slice(0, 2)].map(
                     (major, i) => (
                       <div
                         key={i}
-                        className="p-2.5 rounded-xl bg-[#111526] border border-slate-800 text-xs flex items-center gap-2"
+                        className="px-3.5 py-2.5 rounded-xl bg-[#111528] border border-slate-800 text-xs flex items-center gap-2.5"
                       >
                         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span className="text-slate-200 font-medium">{major}</span>
+                        <span className="text-slate-100 font-medium leading-snug">{major}</span>
                       </div>
                     )
                   )}
@@ -802,11 +802,11 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
               </div>
 
               {/* Universities & THPTQG Exam Focus */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="bg-[#080b16] p-4 rounded-2xl border border-slate-800 space-y-2">
-                  <h4 className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="bg-[#0a0d1c] p-4 rounded-2xl border border-slate-800 space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
                     <Building2 className="w-4 h-4" />
-                    <span>Trường Đại học đề xuất</span>
+                    <span>TRƯỜNG ĐẠI HỌC ĐỀ XUẤT</span>
                   </h4>
                   <ul className="text-xs text-slate-300 space-y-1.5 list-disc list-inside leading-relaxed">
                     {primaryInfo.universities.map((uni, i) => (
@@ -815,26 +815,26 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                   </ul>
                 </div>
 
-                <div className="bg-[#080b16] p-4 rounded-2xl border border-slate-800 space-y-2">
-                  <h4 className="text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+                <div className="bg-[#0a0d1c] p-4 rounded-2xl border border-slate-800 space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
                     <GraduationCap className="w-4 h-4" />
-                    <span>Tổ hợp thi THPTQG nên tập trung</span>
+                    <span>TỔ HỢP THI THPTQG NÊN TẬP TRUNG</span>
                   </h4>
-                  <p className="text-xs text-slate-200 leading-relaxed font-medium">
+                  <p className="text-xs text-slate-100 leading-relaxed font-semibold">
                     {primaryInfo.examFocus}
                   </p>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                  <p className="text-xs text-slate-400 leading-relaxed">
                     Thí sinh có thể luyện tập các môn thi THPT Quốc Gia tương ứng trong phòng thi.
                   </p>
                 </div>
               </div>
 
               {/* Footer Actions */}
-              <div className="pt-2 flex flex-col-reverse sm:flex-row items-center justify-between gap-2.5 border-t border-slate-800">
+              <div className="pt-3 flex flex-col-reverse sm:flex-row items-center justify-between gap-2.5 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={handleReset}
-                  className="w-full sm:w-auto min-h-[44px] py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
+                  className="w-full sm:w-auto min-h-[42px] py-2 px-4 rounded-xl bg-[#15192e] hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Làm lại bài trắc nghiệm</span>
@@ -843,7 +843,7 @@ export const CareerTestModal: React.FC<CareerTestModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="w-full sm:w-auto min-h-[44px] py-2.5 px-6 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs sm:text-sm font-bold transition cursor-pointer text-center"
+                  className="w-full sm:w-auto min-h-[42px] py-2 px-5 rounded-xl bg-gradient-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-fuchsia-600/25 transition cursor-pointer text-center"
                 >
                   <span>{isGuestMode ? 'Hoàn tất & Quay lại trang chủ' : 'Xác nhận & Quay lại phòng thi'}</span>
                 </button>

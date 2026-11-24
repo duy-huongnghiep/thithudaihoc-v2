@@ -14,14 +14,14 @@ export const SheetNoticeBanner: React.FC<SheetNoticeBannerProps> = ({ notice }) 
       id="sheet-global-notice-banner"
       role="status"
       aria-live="polite"
-      className="mb-5 px-3.5 py-3 rounded-xl bg-amber-950/30 border border-amber-500/35 flex items-start gap-3 animate-fadeIn"
+      className="mb-5 p-4 rounded-2xl bg-[#1a1412] border border-amber-500/40 flex items-start gap-3 animate-fadeIn"
     >
-      <Megaphone className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-      <div className="min-w-0 flex-1 space-y-0.5">
+      <Megaphone className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+      <div className="min-w-0 flex-1 space-y-1">
         <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 block">
-          Thông báo hệ thống
+          THÔNG BÁO HỆ THỐNG
         </span>
-        <p className="text-xs sm:text-[13px] text-amber-100/95 leading-relaxed whitespace-pre-line font-medium">
+        <p className="text-xs sm:text-sm text-amber-100 leading-relaxed whitespace-pre-line font-medium">
           {cleanNotice}
         </p>
       </div>

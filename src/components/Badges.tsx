@@ -1,7 +1,6 @@
 import React from 'react';
 import { isYes } from '../services/api';
 import { SheetGlobalConfig, StudentInfo } from '../types';
-import { BookOpenCheck, Brain, GraduationCap, Compass } from 'lucide-react';
 
 interface ExamBadgesProps {
   student: StudentInfo;
@@ -17,56 +16,61 @@ export const ExamBadges: React.FC<ExamBadgesProps> = ({ student, size = 'sm', gl
   const hasHuongnghiep =
     isYes(student.huongnghiep) && (!gateLoaded || Boolean(globalConfig?.enableHuongnghiep));
 
-  if (!hasHsa && !hasVact && !hasThptqg && !hasHuongnghiep) {
+  const items: Array<{ id: string; label: string; title: string; classes: string }> = [];
+  if (hasHsa) {
+    items.push({
+      id: 'badge-hsa',
+      label: 'ĐGNL HSA',
+      title: 'Đã đăng ký ĐGNL HSA - ĐHQGHN',
+      classes: 'bg-blue-500/15 text-blue-300 border-blue-500/35',
+    });
+  }
+  if (hasVact) {
+    items.push({
+      id: 'badge-vact',
+      label: 'ĐGNL V-ACT',
+      title: 'Đã đăng ký ĐGNL V-ACT - ĐHQG-HCM',
+      classes: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35',
+    });
+  }
+  if (hasThptqg) {
+    items.push({
+      id: 'badge-thptqg',
+      label: 'THPT Quốc Gia',
+      title: 'Đã đăng ký Thi thử Tốt Nghiệp THPTQG',
+      classes: 'bg-purple-500/15 text-purple-300 border-purple-500/35',
+    });
+  }
+  if (hasHuongnghiep) {
+    items.push({
+      id: 'badge-huongnghiep',
+      label: 'Hướng nghiệp',
+      title: 'Đã kích hoạt mục Test Hướng nghiệp',
+      classes: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/35',
+    });
+  }
+
+  if (items.length === 0) {
     return (
-      <span className="text-slate-400 text-xs italic">Chưa đăng ký môn thi nào</span>
+      <span className="text-slate-500 text-xs italic">Chưa đăng ký môn thi nào</span>
     );
   }
 
-  const sizeClass = size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
+  const sizeClass =
+    size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {hasHsa && (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((item) => (
         <span
-          id="badge-hsa"
-          className={`inline-flex items-center gap-1.5 font-semibold rounded-md bg-blue-500/12 text-blue-300 ${sizeClass}`}
-          title="Đã đăng ký ĐGNL HSA - ĐHQGHN"
+          key={item.id}
+          id={item.id}
+          title={item.title}
+          className={`inline-flex items-center rounded-lg border font-bold ${sizeClass} ${item.classes}`}
         >
-          <GraduationCap className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-          <span>HSA</span>
+          {item.label}
         </span>
-      )}
-      {hasVact && (
-        <span
-          id="badge-vact"
-          className={`inline-flex items-center gap-1.5 font-semibold rounded-md bg-emerald-500/12 text-emerald-300 ${sizeClass}`}
-          title="Đã đăng ký ĐGNL VACT - ĐHQG-HCM"
-        >
-          <Brain className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span>VACT</span>
-        </span>
-      )}
-      {hasThptqg && (
-        <span
-          id="badge-thptqg"
-          className={`inline-flex items-center gap-1.5 font-semibold rounded-md bg-purple-500/12 text-purple-300 ${sizeClass}`}
-          title="Đã đăng ký Thi thử Tốt Nghiệp THPTQG"
-        >
-          <BookOpenCheck className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-          <span>THPTQG</span>
-        </span>
-      )}
-      {hasHuongnghiep && (
-        <span
-          id="badge-huongnghiep"
-          className={`inline-flex items-center gap-1.5 font-semibold rounded-md bg-fuchsia-500/12 text-fuchsia-300 ${sizeClass}`}
-          title="Đã kích hoạt mục Test Hướng nghiệp"
-        >
-          <Compass className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
-          <span>Hướng nghiệp</span>
-        </span>
-      )}
+      ))}
     </div>
   );
 };

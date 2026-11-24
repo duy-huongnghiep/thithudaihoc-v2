@@ -33,7 +33,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
     {
       id: 1,
       badge: 'B1',
-      title: 'Đăng Ký Tài Khoản',
+      title: 'Đăng ký tài khoản',
       icon: PenTool,
       content: {
         heading: 'Bước 1: Đăng ký tài khoản thi thử trực tiếp trên Web',
@@ -46,7 +46,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           'Nhấn "Hoàn tất đăng ký tài khoản", hệ thống tự động cấp SBD 5 số và lưu dữ liệu lên hệ thống.',
           'Sau khi đăng ký xong, nhấn "Đăng nhập ngay" để vào phòng thi!',
         ],
-        actionLabel: 'Đăng Ký Tài Khoản Ngay',
+        actionLabel: 'Đăng ký tài khoản ngay',
         actionCallback: () => {
           onClose();
           if (onGoToRegister) onGoToRegister();
@@ -56,7 +56,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
     {
       id: 2,
       badge: 'B2',
-      title: 'Tra Cứu Thông Tin',
+      title: 'Tra cứu thông tin',
       icon: Search,
       content: {
         heading: 'Bước 2: Tra cứu thông tin dự thi và mật khẩu',
@@ -68,7 +68,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           'Nhấn "Tra cứu ngay" để xem Số Báo Danh, Tên đăng nhập, Mật khẩu và các kỳ thi đã đăng ký.',
           'Nhấn "Đăng nhập ngay với tài khoản này" để vào thẳng phòng thi!',
         ],
-        actionLabel: 'Đến Trang Tra Cứu Ngay',
+        actionLabel: 'Đến trang tra cứu ngay',
         actionCallback: () => {
           onClose();
           if (onGoToSearch) onGoToSearch();
@@ -78,7 +78,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
     {
       id: 3,
       badge: 'B3',
-      title: 'Đăng Nhập Hệ Thống',
+      title: 'Đăng nhập hệ thống',
       icon: LogIn,
       content: {
         heading: 'Bước 3: Đăng nhập vào cổng thí sinh',
@@ -87,9 +87,9 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         bulletPoints: [
           'Nhập Tài khoản (Số điện thoại) và Mật khẩu đã đăng ký.',
           'Bấm biểu tượng con mắt để kiểm tra lại mật khẩu nếu cần.',
-          'Bấm "Đăng Nhập" để truy cập phòng thi cá nhân.',
+          'Bấm "Đăng nhập" để truy cập phòng thi cá nhân.',
         ],
-        actionLabel: 'Về Giao Diện Đăng Nhập',
+        actionLabel: 'Về giao diện đăng nhập',
         actionCallback: () => {
           onClose();
           if (onGoToLogin) onGoToLogin();
@@ -99,7 +99,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
     {
       id: 4,
       badge: 'B4',
-      title: 'Đếm Ngược & Mở Đề',
+      title: 'Đếm ngược & Mở đề',
       icon: Timer,
       content: {
         heading: 'Bước 4: Theo dõi lịch thi & Đồng hồ đếm ngược',
@@ -115,7 +115,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
     {
       id: 5,
       badge: 'B5',
-      title: 'Vào Thi Trực Tuyến',
+      title: 'Vào thi trực tuyến',
       icon: PlayCircle,
       content: {
         heading: 'Bước 5: Bắt đầu làm bài thi trắc nghiệm',
@@ -123,7 +123,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           'Sau khi phòng thi mở, chọn các môn thi trong phạm vi đã đăng ký để bắt đầu làm bài.',
         bulletPoints: [
           'Chọn kỳ thi (HSA / V-ACT / THPTQG) và phần thi muốn làm.',
-          'Đọc kỹ quy chế và nhấn "Mở Đề & Bắt Đầu Thi".',
+          'Đọc kỹ quy chế và nhấn "Mở đề & Bắt đầu thi".',
           'Nhấn Nộp bài sau khi hoàn thành để xem điểm và lời giải chi tiết.',
         ],
       },
@@ -131,7 +131,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
     {
       id: 6,
       badge: 'B6',
-      title: 'Test Hướng Nghiệp',
+      title: 'Test Hướng nghiệp',
       icon: Compass,
       content: {
         heading: 'Bước 6: Trắc nghiệm hướng nghiệp RIASEC trực tiếp trên web',
@@ -140,22 +140,22 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         bulletPoints: [
           'Nhấn "Vào làm bài test Hướng nghiệp" ngay trang chủ (nhập nhanh thông tin) hoặc trong phòng thi.',
           'Trả lời lần lượt 18 câu hỏi đánh giá sở thích.',
-          'Bấm "Xem Kết Quả Định Hướng" để nhận phân tích RIASEC, ngành học, trường ĐH và tổ hợp THPTQG.',
+          'Bấm "Xem kết quả định hướng" để nhận phân tích RIASEC, ngành học, trường ĐH và tổ hợp THPTQG.',
         ],
       },
     },
     {
       id: 7,
       badge: 'B7',
-      title: 'Lưu Ý & Hỗ Trợ',
+      title: 'Lưu ý & Hỗ trợ',
       icon: HelpCircle,
       content: {
         heading: 'Bước 7: Hỗ trợ kỹ thuật & Các lưu ý quan trọng',
         description:
           'Giải quyết các tình huống thường gặp khi sử dụng cổng thông tin thi thử.',
         bulletPoints: [
-          'Bạn có thể bấm nút Đồng bộ (Làm mới) ở góc trên bên phải bất cứ lúc nào để cập nhật dữ liệu mới nhất.',
-          'Quên mật khẩu? Dùng tab "Tra cứu SBD" hoặc liên hệ Ban tổ chức qua Facebook hỗ trợ ở cuối trang.',
+          'Bạn có thể bấm nút Đồng bộ ở góc trên bên phải bất cứ lúc nào để cập nhật dữ liệu mới nhất.',
+          'Quên mật khẩu? Dùng tab "Tra cứu SBD" hoặc liên hệ Ban tổ chức qua liên kết hỗ trợ ở cuối trang.',
           'Đảm bảo kết nối mạng ổn định trong suốt thời gian làm bài.',
         ],
       },
@@ -167,26 +167,26 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
   return (
     <div
       id="user-guide-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-black/85 backdrop-blur-xs animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-black/80 backdrop-blur-sm animate-fadeIn"
       onClick={onClose}
     >
       <div
         id="user-guide-modal"
-        className="w-full max-w-2xl bg-[#111526] border border-blue-500/30 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 text-slate-200 relative max-h-[92dvh] flex flex-col"
+        className="w-full max-w-2xl bg-[#0e1120] border border-emerald-500/35 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 text-slate-200 relative max-h-[92dvh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3.5 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/35 flex items-center justify-center text-emerald-400 shrink-0">
               <BookOpen className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <span className="text-[10px] text-blue-400 uppercase font-bold tracking-wider block">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-400 block">
                 Cẩm nang sử dụng
               </span>
               <h2 className="text-sm sm:text-lg font-extrabold text-white truncate">
-                Hướng Dẫn Cổng Thi Thử (B1 – B7)
+                Hướng dẫn Cổng Thi thử (B1 – B7)
               </h2>
             </div>
           </div>
@@ -194,7 +194,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-xl hover:bg-slate-800 cursor-pointer shrink-0"
+            className="min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-xl hover:bg-slate-800 cursor-pointer shrink-0"
             title="Đóng hướng dẫn"
           >
             <X className="w-5 h-5" />
@@ -202,7 +202,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
         </div>
 
         {/* Step Navigation Bar */}
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 shrink-0 border-b border-slate-800/60">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-2 shrink-0 border-b border-slate-800">
           {steps.map((s) => {
             const Icon = s.icon;
             const isActive = s.id === activeStep;
@@ -211,9 +211,9 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 key={s.id}
                 type="button"
                 onClick={() => setActiveStep(s.id)}
-                className={`min-h-[42px] px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer ${
                   isActive
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
                     : 'bg-[#080b16] text-slate-400 hover:text-slate-200 border border-slate-800'
                 }`}
               >
@@ -227,12 +227,12 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
 
         {/* Step Detail Content */}
         <div className="overflow-y-auto pr-1 space-y-4 flex-1 text-xs">
-          <div className="p-4 rounded-2xl bg-[#080b16] border border-slate-800 space-y-3">
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#080b16] border border-slate-800 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 gap-2">
               <h3 className="text-sm font-bold text-white">
                 {currentStepData.content.heading}
               </h3>
-              <span className="text-[11px] text-slate-400 font-mono tabular-nums shrink-0">
+              <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 font-mono tabular-nums font-bold shrink-0">
                 {currentStepData.id}/{steps.length}
               </span>
             </div>
@@ -255,7 +255,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
                 <button
                   type="button"
                   onClick={currentStepData.content.actionCallback}
-                  className="min-h-[42px] inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                  className="min-h-[40px] inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-lg shadow-emerald-600/20"
                 >
                   <span>{currentStepData.content.actionLabel}</span>
                   <ChevronRight className="w-4 h-4" />
@@ -264,26 +264,26 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
             )}
           </div>
 
-          <div className="p-3 bg-blue-950/20 border border-blue-500/25 rounded-xl flex items-start gap-2.5 text-blue-200">
+          <div className="p-3.5 bg-[#0a1024] border border-blue-500/30 rounded-2xl flex items-start gap-2.5 text-slate-300">
             <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-            <div className="text-[11px] leading-relaxed">
-              <strong>Mẹo hay:</strong> Bạn có thể theo dõi tiến độ thi và làm lại đề thi trong suốt khoảng thời gian mở ca thi.
+            <div className="text-xs leading-relaxed">
+              <strong className="text-blue-300">Mẹo hay:</strong> Bạn có thể theo dõi tiến độ thi và làm lại đề thi trong suốt khoảng thời gian mở ca thi.
             </div>
           </div>
         </div>
 
         {/* Footer Controls */}
-        <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0">
+        <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0">
           <button
             type="button"
             disabled={activeStep === 1}
             onClick={() => setActiveStep((curr) => Math.max(1, curr - 1))}
-            className="min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold text-slate-200 bg-[#14182b] hover:bg-slate-800 border border-slate-700 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             ← Bước trước
           </button>
 
-          <span className="text-[11px] font-mono tabular-nums text-slate-400">
+          <span className="text-xs font-mono tabular-nums text-slate-400">
             Bước {activeStep} / {steps.length}
           </span>
 
@@ -291,7 +291,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
             <button
               type="button"
               onClick={() => setActiveStep((curr) => Math.min(steps.length, curr + 1))}
-              className="min-h-[42px] px-4 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition flex items-center gap-1 cursor-pointer"
+              className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition flex items-center gap-1 cursor-pointer"
             >
               <span>Tiếp theo</span>
               <ChevronRight className="w-4 h-4" />
@@ -300,7 +300,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[42px] px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition flex items-center gap-1.5 cursor-pointer"
+              className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition flex items-center gap-1.5 cursor-pointer"
             >
               <span>Đã hiểu</span>
               <CheckCircle2 className="w-4 h-4" />

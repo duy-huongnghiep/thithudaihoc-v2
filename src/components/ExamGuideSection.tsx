@@ -33,19 +33,19 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
         return {
           border: 'border-blue-500/35',
           text: 'text-blue-400',
-          iconBg: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+          badge: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
         };
       case 'emerald':
         return {
           border: 'border-emerald-500/35',
           text: 'text-emerald-400',
-          iconBg: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+          badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
         };
       case 'purple':
         return {
           border: 'border-purple-500/35',
           text: 'text-purple-400',
-          iconBg: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+          badge: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
         };
     }
   };
@@ -55,32 +55,32 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
   return (
     <div id="exam-guide-section" className="space-y-5 text-slate-200">
       {/* Header bar */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+      <div className="flex items-center justify-between border-b border-slate-800 pb-3.5">
         <button
           type="button"
           id="btn-back-from-guide"
           onClick={onBack}
-          className="min-h-[40px] px-3 py-1.5 rounded-xl bg-[#0c1020] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+          className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#0c1020] hover:bg-slate-800 border border-slate-700 text-slate-200 transition flex items-center gap-1.5 text-xs font-bold cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Quay lại</span>
         </button>
 
-        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300 uppercase tracking-wider">
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
           <BookOpen className="w-4 h-4 text-blue-400" />
-          <span>Cẩm nang kỳ thi</span>
+          <span>Cẩm nang Các Kỳ Thi</span>
         </div>
       </div>
 
-      {/* Interactive Tabs */}
-      <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#080b16] border border-slate-800 rounded-xl">
+      {/* Exam Selector Tabs */}
+      <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#090b16] border border-slate-800 rounded-2xl">
         <button
           type="button"
           id="tab-guide-hsa"
           onClick={() => setSelectedExamId('hsa')}
-          className={`min-h-[44px] py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`min-h-[42px] py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
             selectedExamId === 'hsa'
-              ? 'bg-blue-600 text-white'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -92,23 +92,23 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
           type="button"
           id="tab-guide-vact"
           onClick={() => setSelectedExamId('vact')}
-          className={`min-h-[44px] py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`min-h-[42px] py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
             selectedExamId === 'vact'
-              ? 'bg-emerald-600 text-white'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/25'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
           <Brain className="w-4 h-4 shrink-0" />
-          <span>VACT (HCM)</span>
+          <span>V-ACT (HCM)</span>
         </button>
 
         <button
           type="button"
           id="tab-guide-thptqg"
           onClick={() => setSelectedExamId('thptqg')}
-          className={`min-h-[44px] py-2 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`min-h-[42px] py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
             selectedExamId === 'thptqg'
-              ? 'bg-purple-600 text-white'
+              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/25'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -120,20 +120,20 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
       {/* Main Content */}
       <div className="space-y-4 animate-fadeIn">
         {/* Overview */}
-        <div className={`p-4 sm:p-5 bg-[#0c1020] border ${theme.border} rounded-2xl space-y-3`}>
+        <div className={`p-5 bg-[#0c1020] border ${theme.border} rounded-2xl space-y-3`}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <span className={`text-[11px] font-bold uppercase tracking-wider ${theme.text} block mb-1`}>
+              <span className={`inline-block px-2 py-0.5 rounded-md border text-[11px] font-bold mb-1.5 ${theme.badge}`}>
                 {currentExam.shortName}
               </span>
-              <h2 className="text-base sm:text-lg font-bold text-white leading-snug">
+              <h2 className="text-lg font-extrabold text-white leading-snug">
                 {currentExam.fullName}
               </h2>
             </div>
-            <div className={`w-10 h-10 rounded-xl ${theme.iconBg} border flex items-center justify-center shrink-0`}>
-              {selectedExamId === 'hsa' && <GraduationCap className="w-5 h-5" />}
-              {selectedExamId === 'vact' && <Brain className="w-5 h-5" />}
-              {selectedExamId === 'thptqg' && <BookOpenCheck className="w-5 h-5" />}
+            <div className="text-slate-400 shrink-0 mt-1">
+              {selectedExamId === 'hsa' && <GraduationCap className="w-6 h-6 text-blue-400" />}
+              {selectedExamId === 'vact' && <Brain className="w-6 h-6 text-emerald-400" />}
+              {selectedExamId === 'thptqg' && <BookOpenCheck className="w-6 h-6 text-purple-400" />}
             </div>
           </div>
 
@@ -141,7 +141,7 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
             {currentExam.description}
           </p>
 
-          <div className="text-xs text-slate-400 pt-2 border-t border-slate-800/80 flex items-center gap-2">
+          <div className="text-xs text-slate-400 pt-2.5 border-t border-slate-800 flex items-center gap-2">
             <Building2 className="w-4 h-4 text-slate-500 shrink-0" />
             <span>
               Đơn vị tổ chức: <strong className="text-slate-200">{currentExam.organizer}</strong>
@@ -150,43 +150,43 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
         </div>
 
         {/* 4-Column Quick Specs Strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-xl space-y-1">
-            <div className="flex items-center gap-1.5 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-1">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold uppercase">
               <Award className={`w-3.5 h-3.5 ${theme.text}`} />
               <span>Thang điểm</span>
             </div>
-            <div className="text-xs sm:text-sm font-bold text-white font-mono tabular-nums">
+            <div className="text-sm font-extrabold text-white font-mono tabular-nums">
               {currentExam.scaleScore}
             </div>
           </div>
 
-          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-xl space-y-1">
-            <div className="flex items-center gap-1.5 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-1">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold uppercase">
               <Clock className={`w-3.5 h-3.5 ${theme.text}`} />
-              <span>Thời gian thi</span>
+              <span>Thời gian</span>
             </div>
-            <div className="text-xs sm:text-sm font-bold text-white tabular-nums">
+            <div className="text-sm font-extrabold text-white tabular-nums">
               {currentExam.totalTime}
             </div>
           </div>
 
-          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-xl space-y-1">
-            <div className="flex items-center gap-1.5 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-1">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold uppercase">
               <HelpCircle className={`w-3.5 h-3.5 ${theme.text}`} />
               <span>Số câu hỏi</span>
             </div>
-            <div className="text-xs sm:text-sm font-bold text-white tabular-nums">
+            <div className="text-sm font-extrabold text-white tabular-nums">
               {currentExam.totalQuestions}
             </div>
           </div>
 
-          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-xl space-y-1">
-            <div className="flex items-center gap-1.5 text-slate-400 text-[10px] uppercase font-bold tracking-wider">
+          <div className="p-3.5 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-1">
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold uppercase">
               <Layers className={`w-3.5 h-3.5 ${theme.text}`} />
-              <span>Hình thức thi</span>
+              <span>Hình thức</span>
             </div>
-            <div className="text-xs sm:text-sm font-bold text-white truncate" title={currentExam.format}>
+            <div className="text-sm font-extrabold text-white truncate" title={currentExam.format}>
               {currentExam.format.includes('máy tính') ? 'Thi trên máy tính' : 'Trắc nghiệm chuẩn'}
             </div>
           </div>
@@ -195,41 +195,41 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
         {/* Detailed Structure Grid */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Layers className={`w-4 h-4 ${theme.text}`} />
-              <span>Cấu trúc đề thi &amp; Các môn liên quan</span>
+              <span>Cấu trúc đề thi &amp; Các phần thi</span>
             </h3>
             <span className="text-xs text-slate-400 font-mono tabular-nums">
               {currentExam.subjectsBreakdown.length} phần thi
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {currentExam.subjectsBreakdown.map((subject, idx) => (
               <div
                 key={idx}
-                className="p-4 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-2.5 text-xs"
+                className="p-4 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-3 text-xs"
               >
-                <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+                <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-3">
                   <div>
                     <h4 className="font-bold text-white text-sm">
                       {subject.name}
                     </h4>
-                    <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-1">
-                      <span className="font-mono tabular-nums text-blue-400 font-semibold">
+                    <div className="text-xs text-slate-400 flex items-center gap-2 mt-1">
+                      <span className={`font-mono tabular-nums font-bold ${theme.text}`}>
                         {subject.duration}
                       </span>
-                      <span>·</span>
+                      <span>•</span>
                       <span>{subject.questions}</span>
                     </div>
                   </div>
                   <span className="text-xs font-mono font-bold text-slate-500 tabular-nums shrink-0">
-                    {String(idx + 1).padStart(2, '0')}
+                    #{String(idx + 1).padStart(2, '0')}
                   </span>
                 </div>
 
                 <div className="space-y-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                  <span className="text-[11px] uppercase font-bold tracking-wider text-slate-400 block">
                     Nội dung trọng tâm
                   </span>
                   <ul className="space-y-1 text-xs text-slate-300">
@@ -243,8 +243,8 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
                 </div>
 
                 {subject.note && (
-                  <div className="p-2.5 bg-amber-950/20 rounded-xl text-[11px] text-amber-200/90 border border-amber-500/20 leading-relaxed">
-                    <strong className="text-amber-400">Lưu ý: </strong>
+                  <div className="pt-2 border-t border-slate-800 text-xs text-amber-200/90 leading-relaxed">
+                    <strong className="text-amber-300">Lưu ý: </strong>
                     {subject.note}
                   </div>
                 )}
@@ -254,10 +254,10 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
         </div>
 
         {/* Universities & Scoring 2-Column */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="p-4 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-2 text-xs">
-            <div className="font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-              <Target className="w-4 h-4 text-indigo-400" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          <div className="p-4 sm:p-5 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-2 text-xs">
+            <div className="font-bold text-blue-300 uppercase tracking-wider text-[11px] flex items-center gap-2">
+              <Target className="w-4 h-4 text-blue-400" />
               <span>Phạm vi công nhận &amp; Xét tuyển</span>
             </div>
             <p className="text-slate-300 leading-relaxed">
@@ -265,8 +265,8 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
             </p>
           </div>
 
-          <div className="p-4 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-2 text-xs">
-            <div className="font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+          <div className="p-4 sm:p-5 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-2 text-xs">
+            <div className="font-bold text-amber-300 uppercase tracking-wider text-[11px] flex items-center gap-2">
               <Award className="w-4 h-4 text-amber-400" />
               <span>Phương thức tính điểm</span>
             </div>
@@ -277,10 +277,10 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
         </div>
 
         {/* Strategies */}
-        <div className="p-4 bg-[#0c1020] border border-blue-500/25 rounded-2xl space-y-2.5 text-xs">
-          <div className="font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+        <div className="p-4 sm:p-5 bg-[#0c1020] border border-slate-800 rounded-2xl space-y-3 text-xs">
+          <div className="font-bold text-amber-300 uppercase tracking-wider text-[11px] flex items-center gap-2">
             <Lightbulb className="w-4 h-4 text-amber-400" />
-            <span>Chiến thuật đạt điểm cao</span>
+            <span>Chiến thuật làm bài hiệu quả</span>
           </div>
           <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-slate-300">
             {currentExam.strategies.map((strategy, sIdx) => (
@@ -293,7 +293,7 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
         </div>
 
         {selectedExamId === 'thptqg' && (
-          <div className="p-4 bg-purple-950/25 border border-purple-500/30 rounded-2xl space-y-1 text-xs">
+          <div className="p-4 bg-[#141028] border border-purple-500/30 rounded-2xl space-y-1 text-xs">
             <div className="font-bold text-purple-300">
               Lưu ý về hỗ trợ thi thử trực tuyến
             </div>
@@ -304,7 +304,7 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
         )}
 
         {selectedExamId === 'vact' && (
-          <div className="p-4 bg-emerald-950/25 border border-emerald-500/30 rounded-2xl space-y-1 text-xs">
+          <div className="p-4 bg-[#0d1c19] border border-emerald-500/30 rounded-2xl space-y-1 text-xs">
             <div className="font-bold text-emerald-300">
               Quy chế thời gian &amp; Hình thức thi V-ACT
             </div>
@@ -318,7 +318,7 @@ export const ExamGuideSection: React.FC<ExamGuideSectionProps> = ({
           type="button"
           id="btn-back-to-home-from-guide"
           onClick={onBack}
-          className="w-full min-h-[46px] py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full min-h-[46px] py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-blue-600/20 text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Quay lại</span>

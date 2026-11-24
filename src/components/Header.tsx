@@ -4,50 +4,51 @@ import { RefreshCw, BookOpen } from 'lucide-react';
 interface HeaderProps {
   onRefreshData?: () => void;
   onOpenUserGuide?: () => void;
+  onOpenExamGuide?: () => void;
+  onGoHome?: () => void;
   isRefreshing?: boolean;
-  lastUpdated?: Date | null;
+  maxWidthClass?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onRefreshData,
   onOpenUserGuide,
+  onGoHome,
   isRefreshing = false,
 }) => {
   return (
     <header
       id="app-header"
-      className="flex items-center justify-between gap-3 pb-4 mb-5 border-b border-slate-800/80"
+      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 pb-5 mb-5 border-b border-slate-800/80"
     >
-      {/* Left Brand Lockup */}
-      <div className="flex items-center gap-3 min-w-0">
-        <div
-          aria-hidden="true"
-          className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-600 text-white font-black text-sm sm:text-base tracking-wider flex items-center justify-center shrink-0 shadow-sm shadow-blue-600/30 border border-blue-400/20"
-        >
+      <button
+        type="button"
+        onClick={onGoHome}
+        className="flex items-center gap-3 text-left cursor-pointer group min-w-0"
+      >
+        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center font-extrabold text-white text-base shadow-[0_0_20px_rgba(59,130,246,0.45)] shrink-0">
           TD
         </div>
         <div className="min-w-0">
-          <h1 className="text-sm sm:text-lg font-extrabold text-white tracking-tight uppercase truncate">
+          <h1 className="text-base sm:text-lg font-extrabold text-white tracking-tight uppercase truncate">
             HỆ THỐNG THI THỬ VÀ HƯỚNG NGHIỆP
           </h1>
-          <p className="text-slate-400 text-[11px] sm:text-xs truncate">
+          <p className="text-xs text-slate-400 truncate">
             Cổng thông tin &amp; thi đánh giá năng lực trực tuyến
           </p>
         </div>
-      </div>
+      </button>
 
-      {/* Right Utility Actions (Mobile-safe >=44px hit targets) */}
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
         {onOpenUserGuide && (
           <button
             type="button"
             id="btn-header-open-guide"
             onClick={onOpenUserGuide}
-            title="Hướng dẫn sử dụng"
-            className="min-h-[40px] sm:min-h-[36px] px-2.5 sm:px-3 rounded-xl bg-[#0b0e1c] hover:bg-slate-800 border border-slate-800 hover:border-emerald-500/40 text-emerald-400 transition text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#121629] hover:bg-slate-800 border border-slate-700/80 text-emerald-300 hover:text-emerald-200 transition text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
           >
-            <BookOpen className="w-4 h-4 shrink-0" />
-            <span className="hidden sm:inline">Hướng dẫn</span>
+            <BookOpen className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Hướng dẫn</span>
           </button>
         )}
 
@@ -57,12 +58,13 @@ export const Header: React.FC<HeaderProps> = ({
             id="btn-refresh-cache"
             onClick={onRefreshData}
             disabled={isRefreshing}
-            title="Làm mới dữ liệu từ Google Sheets"
-            className="min-w-[40px] min-h-[40px] sm:min-w-[36px] sm:min-h-[36px] px-2.5 rounded-xl bg-[#0b0e1c] hover:bg-slate-800 border border-slate-800 hover:border-blue-500/40 text-slate-300 hover:text-blue-400 transition text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            title="Đồng bộ dữ liệu mới nhất"
+            className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#121629] hover:bg-slate-800 border border-slate-700/80 text-slate-200 hover:text-white transition text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 shrink-0 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
-            <span className="hidden md:inline text-[11px]">Đồng bộ</span>
-            <span className="sr-only">Làm mới dữ liệu</span>
+            <RefreshCw
+              className={`w-3.5 h-3.5 shrink-0 ${isRefreshing ? 'animate-spin text-blue-400' : 'text-slate-300'}`}
+            />
+            <span>{isRefreshing ? 'Đang tải...' : 'Đồng bộ'}</span>
           </button>
         )}
       </div>

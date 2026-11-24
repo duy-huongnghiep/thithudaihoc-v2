@@ -23,6 +23,7 @@ import {
   getGlobalSheetConfig,
   subscribeGlobalConfig,
   getExamSchedule,
+  clearAuthSession,
 } from './services/api';
 import { recordLoginToSheet2 } from './services/loginLogger';
 import { AdminSheet2View } from './components/AdminSheet2View';
@@ -31,32 +32,22 @@ import { CareerTestModal } from './components/CareerTestModal';
 import {
   CheckCircle2,
   AlertCircle,
-  LogIn,
-  UserPlus,
-  Search,
   Compass,
   BookOpen,
   ChevronRight,
   Calendar,
+  LogIn,
+  UserPlus,
+  Search,
   GraduationCap,
 } from 'lucide-react';
-
-const SESSION_STUDENT_KEY = 'td_mock_exam_current_student';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('login');
   const [previousTab, setPreviousTab] = useState<ActiveTab>('login');
   const [showUserGuideModal, setShowUserGuideModal] = useState(false);
   const [showGuestCareerModal, setShowGuestCareerModal] = useState(false);
-  const [currentStudent, setCurrentStudent] = useState<StudentInfo | null>(() => {
-    try {
-      const saved = sessionStorage.getItem(SESSION_STUDENT_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return null;
-  });
+  const [currentStudent, setCurrentStudent] = useState<StudentInfo | null>(null);
 
   const [prefillCredentials, setPrefillCredentials] = useState<{
     user: string;
@@ -90,15 +81,6 @@ export default function App() {
     });
     const timer = setInterval(() => setScheduleTick((t) => t + 1), 1000);
     prefetchData();
-    if (currentStudent) {
-      if (isStudentAdmin(currentStudent)) {
-        setActiveTab('admin-logs');
-        setPreviousTab('admin-logs');
-      } else {
-        setActiveTab('dashboard');
-        setPreviousTab('dashboard');
-      }
-    }
     return () => {
       unsubscribeNotice();
       unsubscribeConfig();
@@ -117,6 +99,14 @@ export default function App() {
         : activeTab
     );
     setActiveTab('guide');
+  };
+
+  const handleGoHome = () => {
+    if (currentStudent) {
+      setActiveTab(isStudentAdmin(currentStudent) ? 'admin-logs' : 'dashboard');
+    } else {
+      setActiveTab('login');
+    }
   };
 
   const handleBackFromGuide = () => {
@@ -147,11 +137,6 @@ export default function App() {
 
   const handleLoginSuccess = (student: StudentInfo) => {
     setCurrentStudent(student);
-    try {
-      sessionStorage.setItem(SESSION_STUDENT_KEY, JSON.stringify(student));
-    } catch {
-      // ignore
-    }
 
     const admin = isStudentAdmin(student);
     if (admin) {
@@ -170,21 +155,19 @@ export default function App() {
     recordLoginToSheet2(student).catch(() => {});
   };
 
-  const handleSelectStudentToLogin = (student: StudentInfo) => {
+  const handlePrefillUsernameForLogin = (student: StudentInfo) => {
     setPrefillCredentials({
-      user: student.username,
-      pass: student.password,
+      user: student.username || '',
+      pass: '',
     });
-    handleLoginSuccess(student);
+    setActiveTab('login');
+    showToast('Đã điền tài khoản. Vui lòng nhập mật khẩu để đăng nhập.', 'success');
   };
 
   const handleLogout = () => {
+    clearAuthSession();
     setCurrentStudent(null);
-    try {
-      sessionStorage.removeItem(SESSION_STUDENT_KEY);
-    } catch {
-      // ignore
-    }
+    setPrefillCredentials({ user: '', pass: '' });
     setActiveTab('login');
     setPreviousTab('login');
     showToast('Đã đăng xuất tài khoản thành công', 'success');
@@ -200,23 +183,24 @@ export default function App() {
   const containerMaxWidth =
     activeTab === 'admin-logs'
       ? 'max-w-7xl'
-      : activeTab === 'guide'
-      ? 'max-w-4xl'
+      : activeTab === 'dashboard' || activeTab === 'guide'
+      ? 'max-w-5xl'
       : 'max-w-5xl';
 
   return (
-    <main className="min-h-screen flex flex-col justify-center py-4 px-3 sm:py-8 sm:px-6 bg-[#090c16] text-slate-200 selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#080a14] text-slate-200 p-3 sm:p-6 selection:bg-blue-600 selection:text-white">
       {/* Floating notification toast */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div
-            initial={{ opacity: 0, y: -16, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -16, scale: 0.96 }}
-            className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 text-xs font-semibold backdrop-blur-md border max-w-[92vw] ${
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.16 }}
+            className={`fixed top-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2 text-xs font-semibold backdrop-blur-md border max-w-[92vw] ${
               toastMessage.type === 'success'
-                ? 'bg-emerald-950/95 text-emerald-200 border-emerald-500/35'
-                : 'bg-rose-950/95 text-rose-200 border-rose-500/35'
+                ? 'bg-emerald-950/95 text-emerald-200 border-emerald-500/40'
+                : 'bg-rose-950/95 text-rose-200 border-rose-500/40'
             }`}
           >
             {toastMessage.type === 'success' ? (
@@ -229,31 +213,141 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Main Application Shell */}
-      <div
+      {/* Main Centered Application Card */}
+      <main
         id="app-main-card"
-        className={`w-full mx-auto transition-all duration-200 ${containerMaxWidth} bg-[#111526] border border-slate-800/90 rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-7 shadow-xl shadow-black/40`}
+        className={`w-full ${containerMaxWidth} bg-[#0e1120] border border-slate-800/90 rounded-3xl p-4 sm:p-7 shadow-[0_20px_60px_rgba(0,0,0,0.65)] transition-all duration-300`}
       >
         <Header
           onRefreshData={handleRefreshData}
           onOpenUserGuide={() => setShowUserGuideModal(true)}
+          onOpenExamGuide={handleOpenGuide}
+          onGoHome={handleGoHome}
           isRefreshing={isRefreshing}
+          maxWidthClass={containerMaxWidth}
         />
 
         {(isAuthPortal || activeTab === 'dashboard') && (
           <SheetNoticeBanner notice={globalNotice} />
         )}
 
-        {/* UNIFIED RESPONSIVE AUTH PORTAL (2-column on desktop, single-column form-first on mobile) */}
+        {/* AUTH PORTAL (2-column desktop layout matching screenshot) */}
         {isAuthPortal && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-start">
-            {/* Right Stage on Desktop / First on Mobile: Segmented Mode Switcher + Active Form */}
-            <section className="order-1 lg:order-2 lg:col-span-7 bg-[#0c1020] border border-slate-800/90 rounded-2xl p-4 sm:p-6 space-y-5">
-              {/* 3-Mode Segmented Navigation */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            {/* LEFT COLUMN: RIASEC Career Card + Supported Exams + Quick Guides */}
+            <div className="lg:col-span-5 space-y-4">
+              {/* Direct RIASEC Career Guidance Card outside login */}
+              {isCareerEnabled && (
+                <div className="p-5 rounded-2xl bg-gradient-to-br from-[#170f2b] to-[#111224] border border-fuchsia-500/35 space-y-3.5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/30 flex items-center justify-center text-fuchsia-400 shrink-0">
+                      <Compass className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-fuchsia-400">
+                        LÀM BÀI TRỰC TIẾP · KHÔNG CẦN TÀI KHOẢN
+                      </div>
+                      <h3 className="text-sm sm:text-base font-bold text-white mt-0.5">
+                        Trắc nghiệm Hướng nghiệp RIASEC
+                      </h3>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-300/90 leading-relaxed">
+                    Hoàn thành 18 câu đánh giá sở thích nghề nghiệp để nhận gợi ý ngành học Đại học, trường phù hợp và tổ hợp xét tuyển THPTQG.
+                  </p>
+                  <button
+                    type="button"
+                    id="btn-login-career-test"
+                    onClick={() => setShowGuestCareerModal(true)}
+                    className="w-full min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-purple-600 to-fuchsia-500 hover:from-purple-500 hover:to-fuchsia-400 text-white font-bold rounded-xl shadow-lg shadow-fuchsia-600/25 transition text-xs sm:text-sm flex items-center justify-between gap-2 cursor-pointer"
+                  >
+                    <span>Vào làm bài test Hướng nghiệp</span>
+                    <ChevronRight className="w-4 h-4 shrink-0" />
+                  </button>
+                </div>
+              )}
+
+              {/* Supported Exams + Guides Card */}
+              <div className="p-5 rounded-2xl bg-[#0c1020] border border-slate-800 space-y-3.5">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
+                  <GraduationCap className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span>KỲ THI HỖ TRỢ TRỰC TUYẾN</span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  HSA (ĐHQGHN) · V-ACT (ĐHQG-HCM) · Tốt nghiệp THPTQG (Toán, Lý, Hóa, Sinh). Đăng ký trực tiếp để nhận Số Báo Danh 5 số tự động.
+                </p>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    id="btn-open-exam-guide"
+                    onClick={handleOpenGuide}
+                    className="w-full min-h-[42px] px-3.5 py-2.5 bg-[#080b16] hover:bg-slate-800/80 border border-slate-800 hover:border-blue-500/35 rounded-xl text-left text-xs font-semibold text-slate-200 flex items-center justify-between gap-2 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <BookOpen className="w-4 h-4 text-blue-400 shrink-0" />
+                      <span className="truncate">Cấu trúc &amp; cẩm nang các kỳ thi</span>
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                  </button>
+
+                  <button
+                    type="button"
+                    id="btn-open-user-guide"
+                    onClick={() => setShowUserGuideModal(true)}
+                    className="w-full min-h-[42px] px-3.5 py-2.5 bg-[#080b16] hover:bg-slate-800/80 border border-slate-800 hover:border-emerald-500/35 rounded-xl text-left text-xs font-semibold text-slate-200 flex items-center justify-between gap-2 transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="truncate">Hướng dẫn sử dụng (B1 – B7)</span>
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Schedule Alert on Auth Portal if active */}
+              {schedule.status !== 'NO_SCHEDULE' && schedule.status !== 'FREE_TESTING' && (
+                <div className="p-4 rounded-2xl bg-[#0c1020] border border-slate-800 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                      <span>Lịch mở ca thi hệ thống</span>
+                    </span>
+                    <span
+                      className={`font-bold tabular-nums ${
+                        schedule.status === 'OPEN'
+                          ? 'text-emerald-400'
+                          : schedule.status === 'UPCOMING'
+                          ? 'text-amber-400'
+                          : 'text-rose-400'
+                      }`}
+                    >
+                      {schedule.status === 'OPEN'
+                        ? 'Đang mở cửa'
+                        : schedule.status === 'UPCOMING'
+                        ? 'Sắp diễn ra'
+                        : 'Đã kết thúc'}
+                    </span>
+                  </div>
+                  <div className="font-mono tabular-nums text-slate-200 text-xs">
+                    {schedule.formattedRange}
+                  </div>
+                  {schedule.timeRemainingText && (
+                    <div className="text-[11px] font-mono tabular-nums text-amber-300 font-semibold">
+                      {schedule.timeRemainingText}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* RIGHT COLUMN: 3-Tab Auth Switcher + Form */}
+            <div className="lg:col-span-7 bg-[#0c1020] border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5">
               <div
                 role="tablist"
                 aria-label="Chế độ cổng thí sinh"
-                className="grid grid-cols-3 gap-1 p-1 bg-[#080b16] border border-slate-800 rounded-xl"
+                className="grid grid-cols-3 gap-1.5 p-1 bg-[#080b16] border border-slate-800/80 rounded-xl"
               >
                 <button
                   type="button"
@@ -261,10 +355,10 @@ export default function App() {
                   aria-selected={activeTab === 'login'}
                   id="tab-auth-login"
                   onClick={() => setActiveTab('login')}
-                  className={`min-h-[42px] px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`min-h-[40px] px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer ${
                     activeTab === 'login'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-[#3b6ff5] text-white shadow-md shadow-blue-600/20'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                   }`}
                 >
                   <LogIn className="w-3.5 h-3.5 shrink-0" />
@@ -280,10 +374,10 @@ export default function App() {
                     setPreviousTab(activeTab);
                     setActiveTab('register');
                   }}
-                  className={`min-h-[42px] px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`min-h-[40px] px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer ${
                     activeTab === 'register'
-                      ? 'bg-amber-500 text-slate-950 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                   }`}
                 >
                   <UserPlus className="w-3.5 h-3.5 shrink-0" />
@@ -299,10 +393,10 @@ export default function App() {
                     setPreviousTab(activeTab);
                     setActiveTab('search');
                   }}
-                  className={`min-h-[42px] px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`min-h-[40px] px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer ${
                     activeTab === 'search'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                   }`}
                 >
                   <Search className="w-3.5 h-3.5 shrink-0" />
@@ -314,10 +408,10 @@ export default function App() {
                 {activeTab === 'login' && (
                   <motion.div
                     key="login-tab"
-                    initial={{ opacity: 0, y: 6 }}
+                    initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.16 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.14 }}
                   >
                     <LoginForm
                       onLoginSuccess={handleLoginSuccess}
@@ -338,14 +432,14 @@ export default function App() {
                 {activeTab === 'register' && (
                   <motion.div
                     key="register-tab"
-                    initial={{ opacity: 0, y: 6 }}
+                    initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.16 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.14 }}
                   >
                     <RegisterSection
                       onBackToLogin={() => setActiveTab('login')}
-                      onRegisterSuccessLogin={handleSelectStudentToLogin}
+                      onRegisterSuccessLogin={handleLoginSuccess}
                     />
                   </motion.div>
                 )}
@@ -353,132 +447,19 @@ export default function App() {
                 {activeTab === 'search' && (
                   <motion.div
                     key="search-tab"
-                    initial={{ opacity: 0, y: 6 }}
+                    initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.16 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.14 }}
                   >
                     <SearchSection
                       onBackToLogin={() => setActiveTab('login')}
-                      onSelectStudentToLogin={handleSelectStudentToLogin}
+                      onSelectStudentToLogin={handlePrefillUsernameForLogin}
                     />
                   </motion.div>
                 )}
               </AnimatePresence>
-            </section>
-
-            {/* Left Rail on Desktop / Below Form on Mobile: Schedule + Career Test + Exam Resources */}
-            <aside className="order-2 lg:order-1 lg:col-span-5 space-y-4">
-              {/* Contest Schedule Card (Shown only when schedule is explicitly configured) */}
-              {schedule.status !== 'NO_SCHEDULE' && schedule.status !== 'FREE_TESTING' && (
-                <div className="p-4 rounded-2xl bg-[#0c1020] border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                      <span>Lịch ca thi</span>
-                    </span>
-                    <span
-                      className={`text-xs font-bold tabular-nums ${
-                        schedule.status === 'OPEN'
-                          ? 'text-emerald-400'
-                          : schedule.status === 'UPCOMING'
-                          ? 'text-amber-400'
-                          : 'text-rose-400'
-                      }`}
-                    >
-                      {schedule.status === 'OPEN'
-                        ? 'Đang mở cửa'
-                        : schedule.status === 'UPCOMING'
-                        ? 'Sắp diễn ra'
-                        : 'Đã kết thúc'}
-                    </span>
-                  </div>
-                  <div className="text-xs font-mono tabular-nums text-slate-200">
-                    {schedule.formattedRange}
-                  </div>
-                  {schedule.timeRemainingText && (
-                    <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono tabular-nums">
-                      <span className="text-amber-300 font-semibold">
-                        {schedule.timeRemainingText}
-                      </span>
-                      {schedule.status === 'UPCOMING' && (
-                        <span className="text-slate-500 font-sans">Tự mở khi đến giờ</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Direct RIASEC Career Assessment Card (No login required) */}
-              {isCareerEnabled && (
-                <div className="p-4 sm:p-5 rounded-2xl bg-[#141129] border border-fuchsia-500/35 space-y-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-fuchsia-500/15 border border-fuchsia-500/30 flex items-center justify-center text-fuchsia-400 shrink-0">
-                      <Compass className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-fuchsia-400 block">
-                        Làm bài trực tiếp · Không cần tài khoản
-                      </span>
-                      <h2 className="text-sm sm:text-base font-bold text-white leading-snug mt-0.5">
-                        Trắc nghiệm Hướng nghiệp RIASEC
-                      </h2>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Hoàn thành 18 câu đánh giá sở thích nghề nghiệp để nhận gợi ý ngành học Đại học, trường phù hợp và tổ hợp xét tuyển THPTQG.
-                  </p>
-                  <button
-                    type="button"
-                    id="btn-login-career-test"
-                    onClick={() => setShowGuestCareerModal(true)}
-                    className="w-full min-h-[44px] px-4 py-2.5 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold rounded-xl transition text-xs sm:text-sm flex items-center justify-between cursor-pointer"
-                  >
-                    <span>Vào làm bài test Hướng nghiệp</span>
-                    <ChevronRight className="w-4 h-4 shrink-0" />
-                  </button>
-                </div>
-              )}
-
-              {/* Portal Overview & Quick Guides */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-[#0c1020] border border-slate-800 space-y-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  <GraduationCap className="w-4 h-4 text-blue-400 shrink-0" />
-                  <span>Kỳ thi hỗ trợ trực tuyến</span>
-                </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  HSA (ĐHQGHN) · V-ACT (ĐHQG-HCM) · Tốt nghiệp THPTQG (Toán, Lý, Hóa, Sinh). Đăng ký trực tiếp để nhận Số Báo Danh 5 số tự động.
-                </p>
-
-                <div className="pt-2 border-t border-slate-800/80 space-y-2">
-                  <button
-                    type="button"
-                    id="btn-open-exam-guide"
-                    onClick={handleOpenGuide}
-                    className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[#090c16] hover:bg-slate-800/80 border border-slate-800 text-slate-200 hover:text-blue-300 transition text-xs font-semibold flex items-center justify-between cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <BookOpen className="w-4 h-4 text-blue-400 shrink-0" />
-                      <span>Cấu trúc &amp; cẩm nang các kỳ thi</span>
-                    </span>
-                    <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
-                  </button>
-
-                  <button
-                    type="button"
-                    id="btn-open-user-guide"
-                    onClick={() => setShowUserGuideModal(true)}
-                    className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[#090c16] hover:bg-slate-800/80 border border-slate-800 text-slate-200 hover:text-emerald-300 transition text-xs font-semibold flex items-center justify-between cursor-pointer"
-                  >
-                    <span className="flex items-center gap-2">
-                      <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Hướng dẫn sử dụng (B1 – B7)</span>
-                    </span>
-                    <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
-                  </button>
-                </div>
-              </div>
-            </aside>
+            </div>
           </div>
         )}
 
@@ -488,10 +469,10 @@ export default function App() {
             {activeTab === 'admin-logs' && currentStudent && (
               <motion.div
                 key="admin-logs-tab"
-                initial={{ opacity: 0, y: 6 }}
+                initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.16 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.14 }}
               >
                 <AdminSheet2View
                   adminStudent={currentStudent}
@@ -505,10 +486,10 @@ export default function App() {
             {activeTab === 'dashboard' && currentStudent && (
               <motion.div
                 key="dashboard-tab"
-                initial={{ opacity: 0, y: 6 }}
+                initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.16 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.14 }}
               >
                 <StudentDashboard
                   student={currentStudent}
@@ -527,10 +508,10 @@ export default function App() {
             {activeTab === 'guide' && (
               <motion.div
                 key="guide-tab"
-                initial={{ opacity: 0, y: 6 }}
+                initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.16 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.14 }}
               >
                 <ExamGuideSection onBack={handleBackFromGuide} />
               </motion.div>
@@ -559,8 +540,8 @@ export default function App() {
           />
         )}
 
-        <Footer />
-      </div>
-    </main>
+        <Footer maxWidthClass={containerMaxWidth} />
+      </main>
+    </div>
   );
 }

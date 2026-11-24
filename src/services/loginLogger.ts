@@ -1,8 +1,16 @@
 import { StudentInfo, LoginLogRecord, CareerResultRecord } from '../types';
-import { isYes, getScriptUrl } from './api';
+import { isYes, getScriptUrl, getAuthHeaders } from './api';
 
 const STORAGE_LOGIN_LOGS_KEY = 'td_mock_exam_login_logs';
 const STORAGE_CAREER_RESULTS_KEY = 'td_mock_exam_career_results';
+
+function sanitizeSpreadsheetCell(value: unknown): string {
+  const s = String(value ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) {
+    return `'${s}`;
+  }
+  return s;
+}
 
 /**
  * Format timestamp in Vietnam timezone (GMT+7)
@@ -86,60 +94,23 @@ export async function fetchSheet2Logs(): Promise<LoginLogRecord[]> {
       `/api/sheet2-data?url=${encodeURIComponent(scriptUrl)}&_t=${Date.now()}`,
       {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers: {
+          Accept: 'application/json',
+          ...getAuthHeaders(),
+        },
       }
     );
+    if (res.status === 401 || res.status === 403) {
+      return [];
+    }
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        try {
-          localStorage.setItem(STORAGE_LOGIN_LOGS_KEY, JSON.stringify(data));
-        } catch {
-          // ignore
-        }
+      if (Array.isArray(data)) {
         return data as LoginLogRecord[];
       }
     }
   } catch {
-    // fallback to direct GAS
-  }
-
-  // Fallback: Direct GAS fetch (for static / GitHub Pages builds)
-  try {
-    const sep = scriptUrl.includes('?') ? '&' : '?';
-    const gasRes = await fetch(`${scriptUrl}${sep}action=get_sheet2&sheet=2&_t=${Date.now()}`, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    if (gasRes.ok) {
-      const parsed = await gasRes.json();
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const mapped = parsed
-          .map((item: any, idx: number): LoginLogRecord => ({
-            id: `gas_client_log_${idx}`,
-            timestamp: String(item.time || item.timestamp || '').trim(),
-            isoDate: item.isoDate || new Date().toISOString(),
-            hoten: String(item.hoten || '').trim(),
-            sbd: String(item.sbd || '').trim(),
-            username: String(item.username || '').trim(),
-            email: String(item.email || '').trim(),
-            namsinh: String(item.namsinh || '').trim(),
-            monthi: String(item.monthi || '').trim(),
-            device: String(item.device || '').trim(),
-            status: String(item.status || 'Đăng nhập thành công').trim(),
-            synced: true,
-          }))
-          .reverse();
-        try {
-          localStorage.setItem(STORAGE_LOGIN_LOGS_KEY, JSON.stringify(mapped));
-        } catch {
-          // ignore
-        }
-        return mapped;
-      }
-    }
-  } catch {
-    // fallback to local
+    // ignore network failure
   }
 
   return getLoginLogs();
@@ -164,7 +135,12 @@ function saveLogRecord(record: LoginLogRecord): void {
 export async function clearLoginLogs(): Promise<void> {
   try {
     localStorage.removeItem(STORAGE_LOGIN_LOGS_KEY);
-    await fetch('/api/clear-logs', { method: 'POST' }).catch(() => {});
+    await fetch('/api/clear-logs', {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+      },
+    }).catch(() => {});
   } catch {
     // Ignore
   }
@@ -193,10 +169,8 @@ export async function recordLoginToSheet2(student: StudentInfo): Promise<LoginLo
     synced: false,
   };
 
-  // 1. Always save to local storage immediately
   saveLogRecord(record);
 
-  // 2. Transmit to server proxy /api/log-login and Google Apps Script
   const payload = {
     id: record.id,
     action: 'log_login',
@@ -213,31 +187,21 @@ export async function recordLoginToSheet2(student: StudentInfo): Promise<LoginLo
     monthi: record.monthi,
     device: record.device,
     status: record.status,
+    scriptUrl: getScriptUrl(),
   };
 
   try {
-    const scriptUrl = getScriptUrl();
-
-    // Strategy A: Local server proxy /api/log-login
-    fetch('/api/log-login', {
+    const res = await fetch('/api/log-login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...getAuthHeaders(),
       },
       body: JSON.stringify(payload),
-    }).catch(() => {});
-
-    // Strategy B: Direct POST request with text/plain (bypasses CORS preflight)
-    fetch(scriptUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
-
-    record.synced = true;
+    });
+    if (res.ok) {
+      record.synced = true;
+    }
   } catch {
     // ignore
   }
@@ -265,15 +229,15 @@ export function copyLogsTableAsTSV(logs: LoginLogRecord[]): boolean {
   ];
   const rows = logs.map((l, index) => [
     index + 1,
-    l.timestamp || '',
-    l.hoten || '',
-    l.sbd || '',
-    l.username || '',
-    l.namsinh || '',
-    l.email || '',
-    l.monthi || '',
-    l.device || '',
-    l.status || 'Đăng nhập thành công',
+    sanitizeSpreadsheetCell(l.timestamp || ''),
+    sanitizeSpreadsheetCell(l.hoten || ''),
+    sanitizeSpreadsheetCell(l.sbd || ''),
+    sanitizeSpreadsheetCell(l.username || ''),
+    sanitizeSpreadsheetCell(l.namsinh || ''),
+    sanitizeSpreadsheetCell(l.email || ''),
+    sanitizeSpreadsheetCell(l.monthi || ''),
+    sanitizeSpreadsheetCell(l.device || ''),
+    sanitizeSpreadsheetCell(l.status || 'Đăng nhập thành công'),
   ]);
   const text = [headers.join('\t'), ...rows.map((r) => r.join('\t'))].join('\n');
   navigator.clipboard.writeText(text);
@@ -341,15 +305,15 @@ export function exportLogsToCSV(customLogs?: LoginLogRecord[]): void {
 
   const rows = logs.map((l, idx) => [
     idx + 1,
-    `"${(l.timestamp || '').replace(/"/g, '""')}"`,
-    `"${(l.hoten || '').replace(/"/g, '""')}"`,
-    `"${(l.sbd || '').replace(/"/g, '""')}"`,
-    `"${(l.username || '').replace(/"/g, '""')}"`,
-    `"${(l.namsinh || '').replace(/"/g, '""')}"`,
-    `"${(l.email || '').replace(/"/g, '""')}"`,
-    `"${(l.monthi || '').replace(/"/g, '""')}"`,
-    `"${(l.device || '').replace(/"/g, '""')}"`,
-    `"${(l.status || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.timestamp || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.hoten || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.sbd || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.username || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.namsinh || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.email || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.monthi || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.device || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(l.status || '').replace(/"/g, '""')}"`,
   ]);
 
   const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
@@ -501,60 +465,6 @@ export async function recordCareerResultToSheet(
   return record;
 }
 
-function parseCareerFromSheet2LogItem(item: any, idx: number): CareerResultRecord | null {
-  const monthi = String(item?.monthi || '').trim();
-  const status = String(item?.status || '').trim();
-  const isCareerRow =
-    (monthi.toLowerCase().includes('hướng nghiệp') && monthi.toLowerCase().includes('mã:')) ||
-    status.startsWith('KQ Hướng nghiệp:') ||
-    status.startsWith('KQ:');
-
-  if (!isCareerRow) return null;
-
-  const codeMatch =
-    monthi.match(/Mã:\s*([RIASEC]{1,6})/i) ||
-    status.match(/KQ(?:\s+Hướng nghiệp)?:\s*([RIASEC]{1,6})/i);
-  const riasecCode = codeMatch ? codeMatch[1].toUpperCase() : '';
-  if (!riasecCode) return null;
-
-  const getScore = (letter: string) => {
-    const m = status.match(new RegExp(`${letter}\\s*:\\s*(\\d+)`, 'i'));
-    return m ? Number(m[1]) : 0;
-  };
-  const scores = {
-    R: getScore('R'),
-    I: getScore('I'),
-    A: getScore('A'),
-    S: getScore('S'),
-    E: getScore('E'),
-    C: getScore('C'),
-  };
-  const scoresText = `R:${scores.R} | I:${scores.I} | A:${scores.A} | S:${scores.S} | E:${scores.E} | C:${scores.C}`;
-  const primaryMatch = status.match(/Nhóm chính:\s*([^|]+)/i);
-  const majorsMatch = status.match(/Ngành:\s*(.+)$/i);
-
-  return {
-    id: `sheet2_client_career_${idx}_${riasecCode}`,
-    timestamp: String(item?.time || item?.timestamp || '').trim(),
-    isoDate: item?.isoDate || new Date().toISOString(),
-    hoten: String(item?.hoten || '').trim(),
-    sbd: String(item?.sbd || '').trim(),
-    username: String(item?.username || '').trim(),
-    email: String(item?.email || '').trim(),
-    namsinh: String(item?.namsinh || '').trim(),
-    riasecCode,
-    primaryTrait: primaryMatch ? primaryMatch[1].trim() : '',
-    secondaryTrait: '',
-    scores,
-    scoresText,
-    recommendedMajors: majorsMatch ? majorsMatch[1].trim() : '',
-    recommendedUniversities: '',
-    examFocus: '',
-    device: String(item?.device || '').trim(),
-    synced: true,
-  };
-}
-
 /**
  * Fetch all career test results from server & Google Sheets
  */
@@ -565,82 +475,23 @@ export async function fetchCareerResults(): Promise<CareerResultRecord[]> {
       `/api/career-results?url=${encodeURIComponent(scriptUrl)}&_t=${Date.now()}`,
       {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers: {
+          Accept: 'application/json',
+          ...getAuthHeaders(),
+        },
       }
     );
+    if (res.status === 401 || res.status === 403) {
+      return [];
+    }
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        try {
-          localStorage.setItem(STORAGE_CAREER_RESULTS_KEY, JSON.stringify(data));
-        } catch {
-          // ignore
-        }
+      if (Array.isArray(data)) {
         return data as CareerResultRecord[];
       }
     }
   } catch {
-    // fallback to direct GAS
-  }
-
-  // Fallback: Direct GAS fetch (supports both get_career_results and get_sheet2)
-  try {
-    const sep = scriptUrl.includes('?') ? '&' : '?';
-    const [resCareer, resSheet2] = await Promise.all([
-      fetch(`${scriptUrl}${sep}action=get_career_results&sheet=5&_t=${Date.now()}`).catch(() => null),
-      fetch(`${scriptUrl}${sep}action=get_sheet2&sheet=2&_t=${Date.now()}`).catch(() => null),
-    ]);
-
-    const merged: CareerResultRecord[] = [];
-    if (resCareer && resCareer.ok) {
-      const parsed = await resCareer.json().catch(() => []);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((item: any, idx: number) => {
-          if (item?.riasecCode) {
-            merged.push({
-              id: `gas_client_career_${idx}`,
-              timestamp: String(item.time || item.timestamp || '').trim(),
-              isoDate: item.isoDate || new Date().toISOString(),
-              hoten: item.hoten || '',
-              sbd: item.sbd || '',
-              username: item.username || '',
-              email: item.email || '',
-              namsinh: item.namsinh || '',
-              riasecCode: item.riasecCode || '',
-              primaryTrait: item.primaryTrait || '',
-              secondaryTrait: item.secondaryTrait || '',
-              scores: item.scores || { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 },
-              scoresText: item.scoresText || '',
-              recommendedMajors: item.recommendedMajors || '',
-              recommendedUniversities: item.recommendedUniversities || '',
-              examFocus: item.examFocus || '',
-              device: item.device || '',
-              synced: true,
-            });
-          }
-        });
-      }
-    }
-    if (resSheet2 && resSheet2.ok) {
-      const parsed2 = await resSheet2.json().catch(() => []);
-      if (Array.isArray(parsed2)) {
-        parsed2.forEach((row: any, idx: number) => {
-          const c = parseCareerFromSheet2LogItem(row, idx);
-          if (c) merged.push(c);
-        });
-      }
-    }
-    if (merged.length > 0) {
-      const reversed = merged.reverse();
-      try {
-        localStorage.setItem(STORAGE_CAREER_RESULTS_KEY, JSON.stringify(reversed));
-      } catch {
-        // ignore
-      }
-      return reversed;
-    }
-  } catch {
-    // fallback to local
+    // ignore network failure
   }
 
   return getLocalCareerResults();
@@ -665,18 +516,18 @@ export function copyCareerResultsAsTSV(results: CareerResultRecord[]): boolean {
   ];
   const rows = results.map((r, index) => [
     index + 1,
-    r.timestamp || '',
-    r.hoten || '',
-    r.sbd || '',
-    r.username || '',
-    r.namsinh || '',
-    r.email || '',
-    r.riasecCode || '',
-    r.primaryTrait || '',
-    r.scoresText || '',
-    r.recommendedMajors || '',
-    r.examFocus || '',
-    r.device || '',
+    sanitizeSpreadsheetCell(r.timestamp || ''),
+    sanitizeSpreadsheetCell(r.hoten || ''),
+    sanitizeSpreadsheetCell(r.sbd || ''),
+    sanitizeSpreadsheetCell(r.username || ''),
+    sanitizeSpreadsheetCell(r.namsinh || ''),
+    sanitizeSpreadsheetCell(r.email || ''),
+    sanitizeSpreadsheetCell(r.riasecCode || ''),
+    sanitizeSpreadsheetCell(r.primaryTrait || ''),
+    sanitizeSpreadsheetCell(r.scoresText || ''),
+    sanitizeSpreadsheetCell(r.recommendedMajors || ''),
+    sanitizeSpreadsheetCell(r.examFocus || ''),
+    sanitizeSpreadsheetCell(r.device || ''),
   ]);
   const text = [headers.join('\t'), ...rows.map((row) => row.join('\t'))].join('\n');
   navigator.clipboard.writeText(text);
@@ -705,18 +556,18 @@ export function exportCareerResultsToCSV(customResults?: CareerResultRecord[]): 
 
   const rows = results.map((r, idx) => [
     idx + 1,
-    `"${(r.timestamp || '').replace(/"/g, '""')}"`,
-    `"${(r.hoten || '').replace(/"/g, '""')}"`,
-    `"${(r.sbd || '').replace(/"/g, '""')}"`,
-    `"${(r.username || '').replace(/"/g, '""')}"`,
-    `"${(r.namsinh || '').replace(/"/g, '""')}"`,
-    `"${(r.email || '').replace(/"/g, '""')}"`,
-    `"${(r.riasecCode || '').replace(/"/g, '""')}"`,
-    `"${(r.primaryTrait || '').replace(/"/g, '""')}"`,
-    `"${(r.scoresText || '').replace(/"/g, '""')}"`,
-    `"${(r.recommendedMajors || '').replace(/"/g, '""')}"`,
-    `"${(r.examFocus || '').replace(/"/g, '""')}"`,
-    `"${(r.device || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.timestamp || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.hoten || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.sbd || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.username || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.namsinh || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.email || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.riasecCode || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.primaryTrait || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.scoresText || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.recommendedMajors || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.examFocus || '').replace(/"/g, '""')}"`,
+    `"${sanitizeSpreadsheetCell(r.device || '').replace(/"/g, '""')}"`,
   ]);
 
   const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
@@ -1062,7 +913,7 @@ function doGet(e) {
       if (u1Norm && seenUsers[u1Norm]) continue;
       if (u1Norm) seenUsers[u1Norm] = true;
 
-      var isAdmin1 = rowNum1 >= 2 && rowNum1 <= 6;
+      var isAdmin1 = false;
       var tbVal1 = thongbaoCol1 >= 0 && r1[thongbaoCol1] ? String(r1[thongbaoCol1]).trim() : String(r1[12] || r1[13] || r1[14] || "").trim();
       combined.push({
         registeredAt: "",

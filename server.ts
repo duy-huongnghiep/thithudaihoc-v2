@@ -1,13 +1,15 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import http from 'http';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 const PORT = 3000;
 const GOOGLE_SCRIPT_URL =
   'https://script.google.com/macros/s/AKfycbxv_LnzrD7mTAAoQYYgEZjdcW8cCNcVoEu1rPCEU2V-EGMaiRLtGRU3yv3sV3WPkeUZTA/exec';
-
-import fs from 'fs';
-import path from 'path';
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
 
 const LOGS_FILE_PATH = path.join(process.cwd(), 'login_logs_store.json');
 const CAREER_RESULTS_FILE_PATH = path.join(process.cwd(), 'career_results_store.json');
@@ -276,10 +278,260 @@ function parseCareerFromSheet2Row(item: any, idx: number): any | null {
   };
 }
 
+function sanitizeAppsScriptUrl(rawUrl: unknown): string {
+  const s = String(rawUrl || '').trim();
+  if (!s) return GOOGLE_SCRIPT_URL;
+  try {
+    const parsed = new URL(s);
+    if (
+      parsed.protocol === 'https:' &&
+      parsed.hostname === 'script.google.com' &&
+      parsed.pathname.startsWith('/macros/')
+    ) {
+      return parsed.toString();
+    }
+  } catch {
+    // fallback to default
+  }
+  return GOOGLE_SCRIPT_URL;
+}
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const hashA = crypto.createHash('sha256').update(a, 'utf8').digest();
+  const hashB = crypto.createHash('sha256').update(b, 'utf8').digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
+interface SessionPayload {
+  sub: string;
+  role: 'admin' | 'student';
+  sbd: string;
+  hoten: string;
+  rowNumber?: number;
+  adminPermissions?: {
+    lichsu: boolean;
+    ketquahuongnghiep: boolean;
+    danhsachtaikhoan: boolean;
+    cauhinh: boolean;
+    hanche: boolean;
+    danhsachdkytk: string;
+  };
+  exp: number;
+}
+
+function signSessionToken(payload: Omit<SessionPayload, 'exp'>): string {
+  const fullPayload: SessionPayload = {
+    ...payload,
+    exp: Date.now() + SESSION_TTL_MS,
+  };
+  const body = Buffer.from(JSON.stringify(fullPayload), 'utf8').toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+function verifySessionToken(token: string): SessionPayload | null {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [body, sig] = parts;
+  if (!body || !sig) return null;
+  const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  if (!timingSafeEqualStr(sig, expectedSig)) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
+    if (!parsed || typeof parsed.exp !== 'number' || parsed.exp <= Date.now()) {
+      return null;
+    }
+    if (parsed.role !== 'admin' && parsed.role !== 'student') {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function getClientIp(req: express.Request): string {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd.trim()) {
+    return fwd.split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+function parseViCutoffMs(val?: string | null): number | null {
+  const s = String(val || '').trim();
+  if (!s) return null;
+  const dmY = s.match(/(?:^|\s)(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s|$)/);
+  if (dmY) {
+    const day = Number(dmY[1]);
+    const month = Number(dmY[2]);
+    const year = Number(dmY[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return Date.UTC(year, month - 1, day, -7, 0, 0, 0);
+    }
+  }
+  const yMd = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (yMd) {
+    return Date.UTC(Number(yMd[1]), Number(yMd[2]) - 1, Number(yMd[3]), -7, 0, 0, 0);
+  }
+  const parsed = new Date(s);
+  if (isNaN(parsed.getTime())) return null;
+  const vnDate = new Date(parsed.getTime() + 7 * 3600 * 1000);
+  return Date.UTC(vnDate.getUTCFullYear(), vnDate.getUTCMonth(), vnDate.getUTCDate(), -7, 0, 0, 0);
+}
+
+function parseViTsMs(val?: string | null, fallbackIso?: string | null): number | null {
+  const s = String(val || '').trim();
+  if (s) {
+    let m = s.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s+(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (m) {
+      const [, h, min, sec = '0', d, mon, y] = m;
+      return Date.UTC(Number(y), Number(mon) - 1, Number(d), Number(h) - 7, Number(min), Number(sec));
+    }
+    m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+    if (m) {
+      const [, d, mon, y, h, min, sec = '0'] = m;
+      return Date.UTC(Number(y), Number(mon) - 1, Number(d), Number(h) - 7, Number(min), Number(sec));
+    }
+    m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (m) {
+      return Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]), -7, 0, 0, 0);
+    }
+    const parsed = new Date(s);
+    if (!isNaN(parsed.getTime())) return parsed.getTime();
+  }
+  if (fallbackIso) {
+    const iso = new Date(fallbackIso);
+    if (!isNaN(iso.getTime())) return iso.getTime();
+  }
+  return null;
+}
+
+function maskAccountServer(val?: string | null): string {
+  const s = String(val || '').trim();
+  if (!s || s === '---') return '---';
+  if (s.length >= 7) return `${s.slice(0, 3)}***${s.slice(-3)}`;
+  if (s.length >= 3) return `${s.slice(0, 2)}***`;
+  return '***';
+}
+
+function maskFullNameServer(val?: string | null): string {
+  const s = String(val || '').trim();
+  if (!s || s === 'Chưa cập nhật') return 'Chưa cập nhật';
+  const parts = s.split(/\s+/);
+  if (parts.length >= 3) return `${parts[0]} *** ${parts[parts.length - 1]}`;
+  if (parts.length === 2) return `${parts[0]} ***`;
+  return `${s.slice(0, 2)}***`;
+}
+
+function maskSbdServer(val?: string | null): string {
+  const s = String(val || '').trim();
+  if (!s || s === '---') return '---';
+  return s.length >= 3 ? `***${s.slice(-2)}` : '***';
+}
+
+function maskEmailServer(val?: string | null): string {
+  const s = String(val || '').trim();
+  if (!s) return '---';
+  return '••• (Hạn chế)';
+}
+
+// Server-side rate limiters (login brute-force & search enumeration)
+const loginAttemptsByIp = new Map<string, { count: number; resetAt: number }>();
+const searchAttemptsByIp = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(
+  store: Map<string, { count: number; resetAt: number }>,
+  key: string,
+  maxAttempts: number,
+  windowMs: number
+): boolean {
+  const now = Date.now();
+  const entry = store.get(key);
+  if (!entry || entry.resetAt <= now) {
+    return true;
+  }
+  return entry.count < maxAttempts;
+}
+
+function recordFailedAttempt(
+  store: Map<string, { count: number; resetAt: number }>,
+  key: string,
+  windowMs: number
+): void {
+  const now = Date.now();
+  const entry = store.get(key);
+  if (!entry || entry.resetAt <= now) {
+    store.set(key, { count: 1, resetAt: now + windowMs });
+  } else {
+    entry.count += 1;
+    store.set(key, entry);
+  }
+}
+
+function clearRateLimit(
+  store: Map<string, { count: number; resetAt: number }>,
+  key: string
+): void {
+  store.delete(key);
+}
+
+// Server-only caches of Trang tính 4 admins & student roster (never sent publicly)
+let serverCachedSheet4Admins: any[] = [];
+let serverCachedStudents: any[] = [];
+
 async function startServer() {
   const app = express();
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '256kb' }));
+  app.use(express.urlencoded({ extended: true, limit: '256kb' }));
+
+  // Standard HTTP security headers (iframe-friendly for AI Studio preview)
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+  });
+
+  const getAuthSession = (req: express.Request): SessionPayload | null => {
+    const authHeader = String(req.headers.authorization || '');
+    if (!authHeader.startsWith('Bearer ')) return null;
+    const token = authHeader.slice(7).trim();
+    return verifySessionToken(token);
+  };
+
+  const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const session = getAuthSession(req);
+    if (!session) {
+      return res.status(401).json({ success: false, message: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.' });
+    }
+    (req as any).authSession = session;
+    return next();
+  };
+
+  const requireAdmin = (
+    permissionKey?: 'lichsu' | 'ketquahuongnghiep' | 'danhsachtaikhoan' | 'cauhinh',
+    disallowRestrictedMutation = false
+  ) => {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const session = getAuthSession(req);
+      if (!session) {
+        return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập tài khoản Quản trị viên.' });
+      }
+      if (session.role !== 'admin') {
+        return res.status(403).json({ success: false, message: 'Tài khoản thí sinh không có quyền truy cập khu vực Quản trị.' });
+      }
+      if (permissionKey && !session.adminPermissions?.[permissionKey]) {
+        return res.status(403).json({ success: false, message: 'Tài khoản Quản trị viên chưa được cấp quyền cho mục này.' });
+      }
+      if (disallowRestrictedMutation && session.adminPermissions?.hanche) {
+        return res.status(403).json({ success: false, message: 'Tài khoản ở chế độ hạn chế không thể thực hiện thao tác này.' });
+      }
+      (req as any).authSession = session;
+      return next();
+    };
+  };
 
   const sanitizeNotice = (raw: unknown): string => {
     const s = String(raw ?? '').trim();
@@ -308,46 +560,71 @@ async function startServer() {
     return s;
   };
 
-  // Helper to enrich student objects with row numbers and admin flags
+  // Helper to enrich student objects strictly as STUDENTS (Trang tính 3 & 1 NEVER grant admin access)
   const enrichStudentRow = (item: any, index: number) => {
-    const rowNumber = index + 2; // Row 2 = A2, Row 3 = A3...
-    const isRowAdmin = rowNumber >= 2 && rowNumber <= 6;
-    const username = String(item?.username || item?.taikhoan || '').toLowerCase().trim();
-    const email = String(item?.email || '').toLowerCase().trim();
-    const sbd = String(item?.sbd || item?.sobaodanh || '').toLowerCase().trim();
-
-    const isAdmin =
-      isRowAdmin ||
-      username === 'amind' ||
-      username === 'admin' ||
-      username.startsWith('admin') ||
-      email === 'admin' ||
-      sbd.startsWith('ad') ||
-      item?.isAdmin === true;
-
+    const rowNumber = typeof item?.rowNumber === 'number' ? item.rowNumber : index + 2;
     const thongbao = sanitizeNotice(
       item?.thongbao ?? item?.Thongbao ?? item?.thongBao ?? item?.notice ?? ''
     );
 
+    if (Array.isArray(item)) {
+      const rawNamsinh = String(item[5] || '').trim();
+      const rawHsa = String(item[6] || '').trim();
+      const digitsHsa = rawHsa.replace(/\D/g, '');
+      const isShiftedYear = !rawNamsinh && digitsHsa.length === 4;
+      return {
+        registeredAt: '',
+        username: String(item[0] || '').trim(),
+        password: String(item[1] || '').trim(),
+        sbd: String(item[2] || '').trim(),
+        hoten: String(item[3] || '').trim(),
+        email: String(item[4] || '').trim(),
+        namsinh: isShiftedYear ? rawHsa : rawNamsinh,
+        hsa: isShiftedYear ? String(item[7] || '').trim() : rawHsa,
+        vact: String(item[isShiftedYear ? 8 : 7] || '').trim(),
+        thptqg: String(item[isShiftedYear ? 9 : 8] || '').trim(),
+        huongnghiep: String(item[isShiftedYear ? 10 : 9] || '').trim(),
+        batdau: String(item[isShiftedYear ? 11 : 10] || '').trim(),
+        ketthuc: String(item[isShiftedYear ? 12 : 11] || '').trim(),
+        thongbao,
+        rowNumber,
+        isAdmin: false,
+        role: 'student' as const,
+      };
+    }
+
     return {
       ...item,
+      username: String(item?.username || item?.taikhoan || '').trim(),
+      password: String(item?.password || item?.pass || item?.matkhau || '').trim(),
+      sbd: String(item?.sbd || item?.sobaodanh || '').trim(),
+      hoten: String(item?.hoten || '').trim(),
+      email: String(item?.email || '').trim(),
+      namsinh: String(item?.namsinh || '').trim(),
       thongbao,
       rowNumber,
-      isAdmin,
+      isAdmin: false,
+      role: 'student' as const,
     };
   };
 
-  // API proxy route to fetch student data from Google Apps Script without CORS / Origin 403
-  app.get('/api/sheet-data', async (req, res) => {
+  const stripStudentPassword = (st: any) => {
+    const { password: _p, pass: _pa, matkhau: _m, ...safe } = st || {};
+    return {
+      ...safe,
+      password: '',
+      isAdmin: false,
+      role: 'student' as const,
+    };
+  };
+
+  // Server-only fetch of Trang tính 4 (keeps admin passwords strictly on the server)
+  const fetchSheet4Raw = async (cleanUrl: string) => {
     try {
-      const customUrl = (req.query.url as string) || GOOGLE_SCRIPT_URL;
-      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
-        ? customUrl.trim()
-        : GOOGLE_SCRIPT_URL;
-
       const sep = cleanUrl.includes('?') ? '&' : '?';
-      const targetUrl = `${cleanUrl}${sep}_t=${Date.now()}`;
-
+      const targetUrl = `${cleanUrl}${sep}action=get_sheet4&_t=${Date.now()}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
       const response = await fetch(targetUrl, {
         method: 'GET',
         headers: {
@@ -355,57 +632,337 @@ async function startServer() {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         },
+        signal: controller.signal,
         redirect: 'follow',
       });
-
-      if (!response.ok) {
-        return res.status(response.status).json({ error: `Google Apps Script returned ${response.status}` });
-      }
+      clearTimeout(timeout);
+      if (!response.ok) return null;
 
       const text = await response.text();
-
-      // Check if valid JSON array
-      let rawArray: any[] | null = null;
+      let data: any = null;
       try {
-        const data = JSON.parse(text);
-        if (Array.isArray(data)) {
-          rawArray = data;
-        } else {
-          return res.json(data);
-        }
+        data = JSON.parse(text);
       } catch {
-        // Strip JSONP callback if any e.g. cb(...)
         const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
-        if (match) {
-          const innerData = JSON.parse(match[1]);
-          if (Array.isArray(innerData)) {
-            rawArray = innerData;
-          } else {
-            return res.json(innerData);
-          }
-        } else {
-          return res.status(500).json({ error: 'Invalid response format from Google Apps Script' });
-        }
+        if (match) data = JSON.parse(match[1]);
+      }
+      if (!data || Array.isArray(data) || (!Array.isArray(data.admins) && !data.globalConfig)) {
+        return null;
       }
 
-      const enriched = (rawArray || []).map(enrichStudentRow);
-      // Merge any newly registered web accounts that haven't appeared in Sheet feed yet
-      const seenUsernames = new Set(
-        enriched.map((s) => String(s?.username || s?.taikhoan || '').trim().toLowerCase()).filter(Boolean)
-      );
-      const merged = [...enriched];
-      for (const localSt of inMemoryRegisteredStudents) {
-        const u = String(localSt?.username || '').trim().toLowerCase();
-        if (u && !seenUsernames.has(u)) {
-          seenUsernames.add(u);
-          merged.unshift({
-            ...localSt,
-            sourceZone: 'sheet3_web',
-            isAdmin: false,
-          });
+      if (Array.isArray(data.admins) && data.admins.length > 0) {
+        serverCachedSheet4Admins = data.admins;
+      }
+      return data;
+    } catch {
+      return null;
+    }
+  };
+
+  // Server-only fetch of Trang tính 3 + Trang tính 1 students (with passwords kept strictly in server RAM)
+  const fetchStudentsRaw = async (cleanUrl: string): Promise<any[]> => {
+    let remoteRows: any[] = [];
+    try {
+      const sep = cleanUrl.includes('?') ? '&' : '?';
+      const targetUrl = `${cleanUrl}${sep}_t=${Date.now()}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      const response = await fetch(targetUrl, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        signal: controller.signal,
+        redirect: 'follow',
+      });
+      clearTimeout(timeout);
+
+      if (response.ok) {
+        const text = await response.text();
+        let rawArray: any[] | null = null;
+        try {
+          const data = JSON.parse(text);
+          if (Array.isArray(data)) rawArray = data;
+        } catch {
+          const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
+          if (match) {
+            const inner = JSON.parse(match[1]);
+            if (Array.isArray(inner)) rawArray = inner;
+          }
+        }
+        if (rawArray) {
+          remoteRows = rawArray.map(enrichStudentRow);
+          if (remoteRows.length > 0) {
+            serverCachedStudents = remoteRows;
+          }
         }
       }
-      return res.json(merged);
+    } catch {
+      // fallback to cached remote rows / locally registered students
+    }
+
+    if (remoteRows.length === 0 && serverCachedStudents.length > 0) {
+      remoteRows = serverCachedStudents;
+    }
+
+    const seenUsernames = new Set(
+      remoteRows.map((s) => String(s?.username || '').trim().toLowerCase()).filter(Boolean)
+    );
+    const merged = [...remoteRows];
+    for (const localSt of inMemoryRegisteredStudents) {
+      const u = String(localSt?.username || '').trim().toLowerCase();
+      if (u && !seenUsernames.has(u)) {
+        seenUsernames.add(u);
+        merged.unshift({
+          ...localSt,
+          sourceZone: 'sheet3_web',
+          isAdmin: false,
+          role: 'student' as const,
+        });
+      }
+    }
+    return merged;
+  };
+
+  // Server-side Authentication Endpoint (ONLY Trang tính 4 = Admin, Trang tính 3 & 1 = Student)
+  app.post('/api/auth/login', async (req, res) => {
+    const clientIp = getClientIp(req);
+    if (!checkRateLimit(loginAttemptsByIp, clientIp, 15, 10 * 60 * 1000)) {
+      return res.status(429).json({
+        success: false,
+        message: 'Bạn đã thử đăng nhập quá nhiều lần. Vui lòng đợi vài phút rồi thử lại.',
+      });
+    }
+
+    try {
+      const body = req.body || {};
+      const rawUser = typeof body.username === 'string' ? body.username.trim() : '';
+      const rawPass = typeof body.password === 'string' ? body.password.trim() : '';
+      if (!rawUser || !rawPass) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vui lòng nhập đầy đủ tài khoản và mật khẩu.',
+        });
+      }
+
+      const cleanUrl = sanitizeAppsScriptUrl(body.scriptUrl || req.query.url);
+
+      // Fetch Trang tính 4 and Student Roster in parallel on server
+      const [sheet4Data, students] = await Promise.all([
+        fetchSheet4Raw(cleanUrl),
+        fetchStudentsRaw(cleanUrl),
+      ]);
+
+      const globalCfg = sheet4Data?.globalConfig || null;
+      const adminsList = Array.isArray(sheet4Data?.admins)
+        ? sheet4Data.admins
+        : serverCachedSheet4Admins;
+
+      // 1. Check Trang tính 4 Admins FIRST (ONLY source of Admin privileges)
+      const lowerUser = rawUser.toLowerCase();
+      const matchedAdmin = adminsList.find((a: any) => {
+        const aUser = String(a?.username || '').trim().toLowerCase();
+        const aPass = String(a?.password || '').trim();
+        return aUser === lowerUser && aPass !== '' && timingSafeEqualStr(aPass, rawPass);
+      });
+
+      if (matchedAdmin) {
+        clearRateLimit(loginAttemptsByIp, clientIp);
+        const adminPerms = {
+          lichsu: Boolean(matchedAdmin.adminPermissions?.lichsu),
+          ketquahuongnghiep: Boolean(matchedAdmin.adminPermissions?.ketquahuongnghiep),
+          danhsachtaikhoan: Boolean(matchedAdmin.adminPermissions?.danhsachtaikhoan),
+          cauhinh: Boolean(matchedAdmin.adminPermissions?.cauhinh),
+          hanche: Boolean(matchedAdmin.adminPermissions?.hanche),
+          danhsachdkytk: String(matchedAdmin.adminPermissions?.danhsachdkytk || '').trim(),
+        };
+        const adminStudent = {
+          username: String(matchedAdmin.username || '').trim(),
+          password: '',
+          sbd: String(matchedAdmin.sbd || `ad${(matchedAdmin.rowNumber || 2) - 1}`).trim(),
+          hoten: String(matchedAdmin.hoten || matchedAdmin.username || '').trim(),
+          email: String(matchedAdmin.email || '').trim(),
+          namsinh: '',
+          hsa: '',
+          vact: '',
+          thptqg: '',
+          huongnghiep: '',
+          batdau: String(globalCfg?.batdau || ''),
+          ketthuc: String(globalCfg?.ketthuc || ''),
+          thongbao: sanitizeNotice(globalCfg?.thongbao),
+          rowNumber: matchedAdmin.rowNumber,
+          isAdmin: true,
+          role: 'admin' as const,
+          adminPermissions: adminPerms,
+        };
+        const token = signSessionToken({
+          sub: adminStudent.username,
+          role: 'admin',
+          sbd: adminStudent.sbd,
+          hoten: adminStudent.hoten,
+          rowNumber: adminStudent.rowNumber,
+          adminPermissions: adminPerms,
+        });
+        return res.json({ success: true, token, student: adminStudent });
+      }
+
+      // 2. Check Trang tính 3 & Trang tính 1 Students (NEVER Admin)
+      const userDigits = rawUser.replace(/\D/g, '');
+      const matchedStudent = students.find((s: any) => {
+        const sUser = String(s?.username || '').trim().toLowerCase();
+        const sPass = String(s?.password || '').trim();
+        if (!sUser || !sPass) return false;
+        const sDigits = sUser.replace(/\D/g, '');
+        const userMatches =
+          sUser === lowerUser || (userDigits.length >= 4 && sDigits === userDigits);
+        return userMatches && timingSafeEqualStr(sPass, rawPass);
+      });
+
+      if (matchedStudent) {
+        clearRateLimit(loginAttemptsByIp, clientIp);
+        const safeStudent = {
+          ...stripStudentPassword(matchedStudent),
+          batdau: globalCfg ? String(globalCfg.batdau || '') : String(matchedStudent.batdau || ''),
+          ketthuc: globalCfg ? String(globalCfg.ketthuc || '') : String(matchedStudent.ketthuc || ''),
+          thongbao: globalCfg
+            ? sanitizeNotice(globalCfg.thongbao)
+            : sanitizeNotice(matchedStudent.thongbao),
+          isAdmin: false,
+          role: 'student' as const,
+        };
+        const token = signSessionToken({
+          sub: safeStudent.username,
+          role: 'student',
+          sbd: safeStudent.sbd || '',
+          hoten: safeStudent.hoten || '',
+        });
+        return res.json({ success: true, token, student: safeStudent });
+      }
+
+      recordFailedAttempt(loginAttemptsByIp, clientIp, 10 * 60 * 1000);
+      return res.status(401).json({
+        success: false,
+        message: 'Tài khoản hoặc mật khẩu không chính xác.',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi xác thực hệ thống';
+      return res.status(500).json({ success: false, message: msg });
+    }
+  });
+
+  // Public Student Lookup Endpoint ("Tra cứu SBD") - rate-limited, strips passwords, excludes admins
+  app.post('/api/search-student', async (req, res) => {
+    const clientIp = getClientIp(req);
+    if (!checkRateLimit(searchAttemptsByIp, clientIp, 30, 5 * 60 * 1000)) {
+      return res.status(429).json({
+        success: false,
+        message: 'Bạn tra cứu quá nhanh. Vui lòng đợi một chút rồi thử lại.',
+      });
+    }
+    recordFailedAttempt(searchAttemptsByIp, clientIp, 5 * 60 * 1000);
+
+    try {
+      const body = req.body || {};
+      const query = typeof body.query === 'string' ? body.query.trim() : '';
+      if (!query || query.length < 2) {
+        return res.status(400).json({ success: false, message: 'Vui lòng nhập số điện thoại, tài khoản hoặc SBD.' });
+      }
+
+      const cleanUrl = sanitizeAppsScriptUrl(body.scriptUrl || req.query.url);
+      const students = await fetchStudentsRaw(cleanUrl);
+      const trimmedLower = query.toLowerCase();
+      const queryDigits = query.replace(/\D/g, '');
+
+      let found = students.find((s) => {
+        return (
+          String(s.username || '').toLowerCase() === trimmedLower ||
+          String(s.sbd || '').toLowerCase() === trimmedLower ||
+          (s.email && String(s.email || '').toLowerCase() === trimmedLower)
+        );
+      });
+
+      if (!found && queryDigits.length >= 4) {
+        found = students.find((s) => {
+          const uDigits = String(s.username || '').replace(/\D/g, '');
+          const sbdDigits = String(s.sbd || '').replace(/\D/g, '');
+          return (
+            (uDigits.length >= 4 && (uDigits.endsWith(queryDigits) || queryDigits.endsWith(uDigits))) ||
+            (sbdDigits.length >= 4 && (sbdDigits.endsWith(queryDigits) || queryDigits.endsWith(sbdDigits)))
+          );
+        });
+      }
+
+      if (!found) {
+        return res.json({ found: false, student: null });
+      }
+
+      // Return public candidate card (NEVER expose plaintext password or admin flag)
+      return res.json({
+        found: true,
+        student: {
+          ...stripStudentPassword(found),
+          email: found.email ? maskEmailIfNeeded(found.email) : '',
+        },
+      });
+    } catch {
+      return res.status(500).json({ found: false, student: null });
+    }
+  });
+
+  function maskEmailIfNeeded(email: string): string {
+    const trimmed = email.trim();
+    const atIdx = trimmed.indexOf('@');
+    if (atIdx <= 2) return trimmed;
+    return `${trimmed.slice(0, 2)}***${trimmed.slice(atIdx)}`;
+  }
+
+  // Admin-only endpoint to retrieve student list (Trang tính 3 & 1), enforcing cutoff & hanche masking server-side
+  app.get('/api/admin/students', requireAdmin('danhsachtaikhoan'), async (req, res) => {
+    try {
+      const session = (req as any).authSession as SessionPayload;
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url);
+      const students = await fetchStudentsRaw(cleanUrl);
+
+      const cutoffMs = parseViCutoffMs(session.adminPermissions?.danhsachdkytk);
+      const restricted = Boolean(session.adminPermissions?.hanche);
+
+      const filtered = students
+        .filter((st) => {
+          if (cutoffMs === null) return true;
+          const ts = parseViTsMs(st.registeredAt);
+          return ts !== null && ts >= cutoffMs;
+        })
+        .map((st) => {
+          const base = {
+            ...stripStudentPassword(st),
+            hasPassword: Boolean(st.password),
+          };
+          if (!restricted) return base;
+          return {
+            ...base,
+            username: maskAccountServer(base.username),
+            hoten: maskFullNameServer(base.hoten),
+            sbd: maskSbdServer(base.sbd),
+            email: maskEmailServer(base.email),
+            namsinh: base.namsinh ? '***' : '',
+          };
+        });
+
+      return res.json(filtered);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      return res.status(500).json({ error: msg });
+    }
+  });
+
+  // Protect legacy /api/sheet-data endpoint behind Admin RBAC too (zero unauthenticated roster leak)
+  app.get('/api/sheet-data', requireAdmin('danhsachtaikhoan'), async (req, res) => {
+    try {
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url);
+      const students = await fetchStudentsRaw(cleanUrl);
+      return res.json(students.map(stripStudentPassword));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Unknown proxy error';
       return res.status(500).json({ error: msg });
@@ -485,49 +1042,17 @@ async function startServer() {
     return { syncedCount, remainingCount, needsGasUpdate };
   };
 
-  // API proxy route to fetch Trang tính 4 (Admin accounts, permissions, QTV A2 config, and exam links)
+  // Public Sheet 4 config endpoint: NEVER exposes admin accounts or passwords!
   app.get('/api/sheet4-data', async (req, res) => {
     try {
-      const customUrl = (req.query.url as string) || GOOGLE_SCRIPT_URL;
-      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
-        ? customUrl.trim()
-        : GOOGLE_SCRIPT_URL;
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url);
+      const data = await fetchSheet4Raw(cleanUrl);
 
-      const sep = cleanUrl.includes('?') ? '&' : '?';
-      const targetUrl = `${cleanUrl}${sep}action=get_sheet4&_t=${Date.now()}`;
-
-      const response = await fetch(targetUrl, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-        redirect: 'follow',
-      });
-
-      if (!response.ok) {
-        return res.json({ deployed: false, admins: [], globalConfig: null, registrationConfig: null, examLinks: {} });
-      }
-
-      const text = await response.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
-        if (match) {
-          data = JSON.parse(match[1]);
-        }
-      }
-
-      // If old GAS returned an array (Sheet 1 fallback), signal deployed: false gracefully
-      if (!data || Array.isArray(data) || (!Array.isArray(data.admins) && !data.globalConfig)) {
-        return res.json({ deployed: false, admins: [], globalConfig: null, registrationConfig: null, examLinks: {} });
+      if (!data) {
+        return res.json({ deployed: false, globalConfig: null, registrationConfig: null, examLinks: {} });
       }
 
       const regConfig = data.registrationConfig || data.globalConfig?.registrationConfig || null;
-      // If newest GAS (with Sheet 3 + registrationConfig) is active and we have unsynced accounts, sync them automatically
       if (regConfig && inMemoryRegisteredStudents.some((s) => s.synced !== true)) {
         syncPendingRegistrationsToGas(cleanUrl).catch(() => {});
       }
@@ -542,24 +1067,20 @@ async function startServer() {
 
       return res.json({
         deployed: true,
-        admins: Array.isArray(data.admins) ? data.admins : [],
         globalConfig: sanitizedGlobalConfig,
         registrationConfig: regConfig,
         examLinks: data.examLinks || {},
         pendingRegistrationSync: inMemoryRegisteredStudents.filter((s) => s.synced !== true).length,
       });
     } catch {
-      return res.json({ deployed: false, admins: [], globalConfig: null, registrationConfig: null, examLinks: {} });
+      return res.json({ deployed: false, globalConfig: null, registrationConfig: null, examLinks: {} });
     }
   });
 
-  // API endpoint to manually trigger syncing pending web registrations -> Trang tính 3
-  app.post('/api/sync-registrations', async (req, res) => {
+  // Admin-only endpoint to trigger syncing pending web registrations -> Trang tính 3
+  app.post('/api/sync-registrations', requireAdmin('danhsachtaikhoan', true), async (req, res) => {
     try {
-      const customUrl = (req.query.url as string) || (req.body?.scriptUrl as string) || GOOGLE_SCRIPT_URL;
-      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
-        ? customUrl.trim()
-        : GOOGLE_SCRIPT_URL;
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url || req.body?.scriptUrl);
       const result = await syncPendingRegistrationsToGas(cleanUrl);
       return res.json({ success: true, ...result });
     } catch (err: unknown) {
@@ -568,31 +1089,40 @@ async function startServer() {
     }
   });
 
-  // API endpoint for direct student registration on web -> writes to Trang tính 3 (cols M-X)
+  // Direct student registration on web -> writes to Trang tính 3 (cols M-X), always role='student'
   app.post('/api/register', async (req, res) => {
     try {
       const body = req.body || {};
-      const username = String(body.username || body.taikhoan || '').trim();
-      const password = String(body.password || body.pass || '').trim();
-      const hoten = String(body.hoten || '').trim();
-      const email = String(body.email || '').trim();
-      const namsinh = String(body.namsinh || '').trim();
+      const username = String(body.username || body.taikhoan || '').trim().slice(0, 40);
+      const password = String(body.password || body.pass || '').trim().slice(0, 64);
+      const hoten = String(body.hoten || '').trim().slice(0, 80);
+      const email = String(body.email || '').trim().slice(0, 120);
+      const namsinh = String(body.namsinh || '').trim().slice(0, 10);
       const hsa = body.hsa ? 'Có' : 'Không';
       const vact = body.vact ? 'Có' : 'Không';
       const thptqg = body.thptqg ? 'Có' : 'Không';
       const huongnghiep = body.huongnghiep ? 'Có' : 'Không';
 
-      if (!username || !password || !hoten) {
+      const digitsOnly = username.replace(/\D/g, '');
+      if (!username || digitsOnly.length < 9 || digitsOnly.length > 12 || password.length < 4 || hoten.length < 2) {
         return res.status(400).json({
           success: false,
-          message: 'Vui lòng nhập đầy đủ Số điện thoại, Mật khẩu và Họ tên.',
+          message: 'Vui lòng nhập Số điện thoại (9–11 số), Mật khẩu (>= 4 ký tự) và Họ tên hợp lệ.',
         });
       }
 
-      const duplicateLocal = inMemoryRegisteredStudents.some(
-        (s) => String(s.username || '').trim().toLowerCase() === username.toLowerCase()
-      );
-      if (duplicateLocal) {
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url || body.scriptUrl);
+      const existingRoster = await fetchStudentsRaw(cleanUrl);
+
+      const duplicate = existingRoster.some((s) => {
+        const u = String(s.username || '').trim().toLowerCase();
+        const uDigits = u.replace(/\D/g, '');
+        return (
+          u === username.toLowerCase() ||
+          (digitsOnly.length >= 8 && uDigits === digitsOnly)
+        );
+      });
+      if (duplicate) {
         return res.status(409).json({
           success: false,
           duplicate: true,
@@ -600,19 +1130,13 @@ async function startServer() {
         });
       }
 
-      const existingSbds = new Set(inMemoryRegisteredStudents.map((s) => String(s.sbd || '').trim()));
-      let generatedSbd = String(body.sbd || '').trim();
-      if (!generatedSbd) {
-        do {
-          generatedSbd = String(Math.floor(10000 + Math.random() * 89999));
-        } while (existingSbds.has(generatedSbd));
-      }
-      const timeStr = String(body.time || '').trim() || formatVietnamNow();
+      const existingSbds = new Set(existingRoster.map((s) => String(s.sbd || '').trim()));
+      let generatedSbd = '';
+      do {
+        generatedSbd = String(Math.floor(10000 + Math.random() * 89999));
+      } while (existingSbds.has(generatedSbd));
 
-      const customUrl = (req.query.url as string) || (body.scriptUrl as string) || GOOGLE_SCRIPT_URL;
-      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
-        ? customUrl.trim()
-        : GOOGLE_SCRIPT_URL;
+      const timeStr = formatVietnamNow();
 
       let gasSynced = false;
       let needsGasUpdate = false;
@@ -652,7 +1176,6 @@ async function startServer() {
               message: parsed.message || 'Số điện thoại / tài khoản này đã tồn tại trên hệ thống!',
             });
           }
-          // Only treat as synced to Trang tính 3 if GAS explicitly returns targetSheet: 'Trang tính 3' or rowNumber
           if (
             parsed?.status === 'success' &&
             (parsed?.targetSheet === 'Trang tính 3' || parsed?.rowNumber !== undefined)
@@ -661,7 +1184,6 @@ async function startServer() {
             if (parsed.sbd) finalSbd = String(parsed.sbd).trim();
             if (parsed.time) finalTime = String(parsed.time).trim();
           } else {
-            // Older Apps Script fell through to handleLogLogin (Trang tính 2) instead of Trang tính 3
             needsGasUpdate = true;
           }
         } catch {
@@ -683,19 +1205,29 @@ async function startServer() {
         thptqg,
         huongnghiep,
         registeredAt: finalTime,
-        sourceZone: 'sheet3_web',
+        sourceZone: 'sheet3_web' as const,
         isAdmin: false,
+        role: 'student' as const,
         synced: gasSynced,
       };
 
       inMemoryRegisteredStudents = [newStudent, ...inMemoryRegisteredStudents.slice(0, 999)];
       persistRegisteredStudents(inMemoryRegisteredStudents);
 
+      const safeStudent = stripStudentPassword(newStudent);
+      const token = signSessionToken({
+        sub: safeStudent.username,
+        role: 'student',
+        sbd: safeStudent.sbd,
+        hoten: safeStudent.hoten,
+      });
+
       return res.json({
         success: true,
         synced: gasSynced,
         needsGasUpdate,
-        student: newStudent,
+        token,
+        student: safeStudent,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi đăng ký tài khoản';
@@ -703,28 +1235,27 @@ async function startServer() {
     }
   });
 
-  // API proxy route to log student login to Sheet 2
-  app.post('/api/log-login', async (req, res) => {
+  // Authenticated login logging (requires valid Bearer session)
+  app.post('/api/log-login', requireAuth, async (req, res) => {
     try {
-      const payload = req.body;
+      const session = (req as any).authSession as SessionPayload;
+      const payload = req.body || {};
 
-      // 1. Save to persistent server store
       const newRecord = {
         id: payload.id || `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        timestamp: payload.time || payload.timestamp || new Date().toLocaleString('vi-VN'),
+        timestamp: payload.time || payload.timestamp || formatVietnamNow(),
         isoDate: payload.isoDate || new Date().toISOString(),
-        hoten: payload.hoten || '',
-        sbd: payload.sbd || '',
-        username: payload.username || '',
-        email: payload.email || '',
-        namsinh: payload.namsinh || '',
-        monthi: payload.monthi || '',
-        device: payload.device || '',
-        status: payload.status || 'Đăng nhập thành công',
+        hoten: session.hoten || String(payload.hoten || '').slice(0, 100),
+        sbd: session.sbd || String(payload.sbd || '').slice(0, 20),
+        username: session.sub || String(payload.username || '').slice(0, 60),
+        email: String(payload.email || '').slice(0, 120),
+        namsinh: String(payload.namsinh || '').slice(0, 10),
+        monthi: String(payload.monthi || '').slice(0, 120),
+        device: String(payload.device || '').slice(0, 80),
+        status: String(payload.status || 'Đăng nhập thành công').slice(0, 120),
         synced: true,
       };
 
-      // Add to front of in-memory list (prevent exact same record duplicated in short window)
       const isDuplicate = inMemoryLogs.some(
         (l) =>
           l.username === newRecord.username &&
@@ -735,18 +1266,19 @@ async function startServer() {
         persistLogs(inMemoryLogs);
       }
 
-      // 2. Transmit to Google Apps Script
-      const customUrl = (req.query.url as string) || GOOGLE_SCRIPT_URL;
-      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
-        ? customUrl.trim()
-        : GOOGLE_SCRIPT_URL;
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url || payload.scriptUrl);
 
       const response = await fetch(cleanUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'text/plain;charset=utf-8',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          username: newRecord.username,
+          hoten: newRecord.hoten,
+          sbd: newRecord.sbd,
+        }),
         redirect: 'follow',
       });
       const responseText = await response.text();
@@ -757,22 +1289,19 @@ async function startServer() {
     }
   });
 
-  // API route to get all login records of Trang tính 2 (Sheet 2)
-  app.get('/api/sheet2-data', async (req, res) => {
+  // Admin-only route to get all login records of Trang tính 2 (Sheet 2), enforcing cutoff & hanche server-side
+  app.get('/api/sheet2-data', requireAdmin('lichsu'), async (req, res) => {
     try {
-      const customUrl = (req.query.url as string) || GOOGLE_SCRIPT_URL;
-      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
-        ? customUrl.trim()
-        : GOOGLE_SCRIPT_URL;
+      const session = (req as any).authSession as SessionPayload;
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url);
 
       let sheetLogs: any[] = [];
 
-      // Try fetching from Google Apps Script if it supports Trang tính 2 retrieval
       try {
         const sep = cleanUrl.includes('?') ? '&' : '?';
         const targetUrl = `${cleanUrl}${sep}action=get_sheet2&sheet=2&_t=${Date.now()}`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3500);
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
         const response = await fetch(targetUrl, {
           method: 'GET',
@@ -811,7 +1340,6 @@ async function startServer() {
         // Fallback to server's persisted logs
       }
 
-      // Merge server-side logs and remote sheet logs, de-duplicating by timestamp + sbd/normalized username
       const combined = [...inMemoryLogs, ...sheetLogs];
       const seen = new Set<string>();
       const uniqueLogs: any[] = [];
@@ -825,59 +1353,81 @@ async function startServer() {
         }
       }
 
-      // Sort newest first
       uniqueLogs.sort((a, b) => {
         const ta = a.isoDate ? new Date(a.isoDate).getTime() : 0;
         const tb = b.isoDate ? new Date(b.isoDate).getTime() : 0;
         return tb - ta;
       });
 
-      return res.json(uniqueLogs);
+      const cutoffMs = parseViCutoffMs(session.adminPermissions?.danhsachdkytk);
+      const restricted = Boolean(session.adminPermissions?.hanche);
+
+      const finalLogs = uniqueLogs
+        .filter((log) => {
+          if (cutoffMs === null) return true;
+          const ts = parseViTsMs(log.timestamp, log.isoDate);
+          return ts !== null && ts >= cutoffMs;
+        })
+        .map((log) => {
+          if (!restricted) return log;
+          return {
+            ...log,
+            hoten: maskFullNameServer(log.hoten),
+            sbd: maskSbdServer(log.sbd),
+            username: maskAccountServer(log.username),
+            email: maskEmailServer(log.email),
+            namsinh: log.namsinh ? '***' : '',
+          };
+        });
+
+      return res.json(finalLogs);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error fetching sheet 2 logs';
-      return res.status(500).json({ error: msg, fallback: inMemoryLogs });
+      return res.status(500).json({ error: msg });
     }
   });
 
-  // API endpoint to clear or reset logs (Admin function)
-  app.post('/api/clear-logs', (_req, res) => {
+  // Admin-only endpoint to clear logs (requires 'cauhinh' permission and non-restricted account)
+  app.post('/api/clear-logs', requireAdmin('cauhinh', true), (_req, res) => {
     inMemoryLogs = [];
     persistLogs(inMemoryLogs);
     res.json({ success: true, message: 'All logs cleared' });
   });
 
-  // API proxy route to save RIASEC career test results to Google Sheets & persistent server store
+  // Public/Student RIASEC career test submission (allowed without login because guests take the test on the portal)
   app.post('/api/log-career', async (req, res) => {
     try {
-      const payload = req.body;
-      const timestamp = payload.time || payload.timestamp || new Date().toLocaleString('vi-VN');
+      const payload = req.body || {};
+      const timestamp = String(payload.time || payload.timestamp || formatVietnamNow()).slice(0, 40);
 
       const careerRecord = {
-        id: payload.id || `career_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        id: String(payload.id || `career_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`).slice(0, 64),
         timestamp,
-        isoDate: payload.isoDate || new Date().toISOString(),
-        hoten: payload.hoten || '',
-        sbd: payload.sbd || '',
-        username: payload.username || '',
-        email: payload.email || '',
-        namsinh: payload.namsinh || '',
-        riasecCode: payload.riasecCode || '',
-        primaryTrait: payload.primaryTrait || '',
-        secondaryTrait: payload.secondaryTrait || '',
+        isoDate: String(payload.isoDate || new Date().toISOString()).slice(0, 40),
+        hoten: String(payload.hoten || '').trim().slice(0, 100),
+        sbd: String(payload.sbd || '').trim().slice(0, 20),
+        username: String(payload.username || '').trim().slice(0, 60),
+        email: String(payload.email || '').trim().slice(0, 120),
+        namsinh: String(payload.namsinh || '').trim().slice(0, 10),
+        riasecCode: String(payload.riasecCode || '').trim().slice(0, 10),
+        primaryTrait: String(payload.primaryTrait || '').trim().slice(0, 120),
+        secondaryTrait: String(payload.secondaryTrait || '').trim().slice(0, 120),
         scores: payload.scores || { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 },
-        scoresText: payload.scoresText || '',
-        recommendedMajors: payload.recommendedMajors || '',
-        recommendedUniversities: payload.recommendedUniversities || '',
-        examFocus: payload.examFocus || '',
-        device: payload.device || '',
+        scoresText: String(payload.scoresText || '').trim().slice(0, 120),
+        recommendedMajors: String(payload.recommendedMajors || '').trim().slice(0, 400),
+        recommendedUniversities: String(payload.recommendedUniversities || '').trim().slice(0, 400),
+        examFocus: String(payload.examFocus || '').trim().slice(0, 250),
+        device: String(payload.device || '').trim().slice(0, 80),
         synced: false,
       };
 
-      // 1. Save to persistent career results store
+      if (!careerRecord.hoten || !careerRecord.riasecCode) {
+        return res.status(400).json({ success: false, message: 'Thiếu thông tin kết quả hướng nghiệp.' });
+      }
+
       inMemoryCareerResults = [careerRecord, ...inMemoryCareerResults.slice(0, 499)];
       persistCareerResults(inMemoryCareerResults);
 
-      // 2. Also add summary log to Trang tính 2 local log list so Admins see it immediately
       const sheet2LogRecord = {
         id: `log_${careerRecord.id}`,
         timestamp,
@@ -895,11 +1445,7 @@ async function startServer() {
       inMemoryLogs = [sheet2LogRecord, ...inMemoryLogs.slice(0, 499)];
       persistLogs(inMemoryLogs);
 
-      // 3. Forward to Google Apps Script (supports both custom log_career and fallback handleLogLogin)
-      const customUrl = (req.query.url as string) || (payload.scriptUrl as string) || GOOGLE_SCRIPT_URL;
-      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
-        ? customUrl.trim()
-        : GOOGLE_SCRIPT_URL;
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url || payload.scriptUrl);
 
       let gasResponseText = '';
       let gasSynced = false;
@@ -968,26 +1514,23 @@ async function startServer() {
     }
   });
 
-  // API route to fetch all career test results (from Google Sheets + Sheet 2 fallback + local server store)
-  app.get('/api/career-results', async (req, res) => {
+  // Admin-only route to fetch all career test results (enforcing cutoff & hanche server-side)
+  app.get('/api/career-results', requireAdmin('ketquahuongnghiep'), async (req, res) => {
     try {
-      const customUrl = (req.query.url as string) || GOOGLE_SCRIPT_URL;
-      const cleanUrl = customUrl.trim().startsWith('https://script.google.com/')
-        ? customUrl.trim()
-        : GOOGLE_SCRIPT_URL;
+      const session = (req as any).authSession as SessionPayload;
+      const cleanUrl = sanitizeAppsScriptUrl(req.query.url);
 
       let sheetCareerResults: any[] = [];
       let sheet2CareerResults: any[] = [];
 
       const sep = cleanUrl.includes('?') ? '&' : '?';
 
-      // Fetch both get_career_results and get_sheet2 in parallel so career results logged to Trang tính 2 are never missed
       await Promise.all([
         (async () => {
           try {
             const targetUrl = `${cleanUrl}${sep}action=get_career_results&sheet=5&_t=${Date.now()}`;
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 4500);
+            const timeout = setTimeout(() => controller.abort(), 12000);
             const response = await fetch(targetUrl, {
               method: 'GET',
               headers: { Accept: 'application/json, text/plain, */*' },
@@ -1034,7 +1577,7 @@ async function startServer() {
           try {
             const targetUrl = `${cleanUrl}${sep}action=get_sheet2&sheet=2&_t=${Date.now()}`;
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 4500);
+            const timeout = setTimeout(() => controller.abort(), 12000);
             const response = await fetch(targetUrl, {
               method: 'GET',
               headers: { Accept: 'application/json, text/plain, */*' },
@@ -1059,7 +1602,6 @@ async function startServer() {
         })(),
       ]);
 
-      // Also extract any career rows from inMemoryLogs as extra safety
       const memoryLogCareers = inMemoryLogs
         .map((row, idx) => parseCareerFromSheet2Row(row, idx))
         .filter((r): r is NonNullable<typeof r> => Boolean(r));
@@ -1082,17 +1624,37 @@ async function startServer() {
         }
       }
 
-      // Sort newest first
       uniqueResults.sort((a, b) => {
         const ta = a.isoDate ? new Date(a.isoDate).getTime() : 0;
         const tb = b.isoDate ? new Date(b.isoDate).getTime() : 0;
         return tb - ta;
       });
 
-      return res.json(uniqueResults);
+      const cutoffMs = parseViCutoffMs(session.adminPermissions?.danhsachdkytk);
+      const restricted = Boolean(session.adminPermissions?.hanche);
+
+      const finalResults = uniqueResults
+        .filter((r) => {
+          if (cutoffMs === null) return true;
+          const ts = parseViTsMs(r.timestamp, r.isoDate);
+          return ts !== null && ts >= cutoffMs;
+        })
+        .map((r) => {
+          if (!restricted) return r;
+          return {
+            ...r,
+            hoten: maskFullNameServer(r.hoten),
+            sbd: maskSbdServer(r.sbd),
+            username: maskAccountServer(r.username),
+            email: maskEmailServer(r.email),
+            namsinh: r.namsinh ? '***' : '',
+          };
+        });
+
+      return res.json(finalResults);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error fetching career results';
-      return res.status(500).json({ error: msg, fallback: inMemoryCareerResults });
+      return res.status(500).json({ error: msg });
     }
   });
 

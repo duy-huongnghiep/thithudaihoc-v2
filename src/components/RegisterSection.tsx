@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  UserPlus,
   Phone,
   Lock,
   Eye,
@@ -11,10 +10,11 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  LogIn,
   Copy,
   Check,
   ArrowLeft,
+  UserPlus,
+  LogIn,
 } from 'lucide-react';
 import {
   getGlobalSheetConfig,
@@ -164,7 +164,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
       createdStudent.hsa === 'Có' ? 'ĐGNL HSA' : null,
       createdStudent.vact === 'Có' ? 'ĐGNL V-ACT' : null,
       createdStudent.thptqg === 'Có' ? 'THPT Quốc Gia' : null,
-      createdStudent.huongnghiep === 'Có' ? 'Hướng nghiệp RIASEC' : null,
+      createdStudent.huongnghiep === 'Có' ? 'Hướng nghiệp' : null,
     ]
       .filter(Boolean)
       .join(' · ');
@@ -173,32 +173,32 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
       <div id="register-success-view" className="space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2 text-emerald-400">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <h2 className="text-sm sm:text-base font-bold text-white">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+            <h2 className="text-base font-bold text-white">
               Đăng ký tài khoản thành công
             </h2>
           </div>
           <button
             type="button"
             onClick={onBackToLogin}
-            className="min-h-[36px] text-xs text-slate-400 hover:text-white transition flex items-center gap-1 cursor-pointer"
+            className="text-xs text-slate-400 hover:text-white transition flex items-center gap-1 cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Về đăng nhập</span>
+            <span>Đăng nhập</span>
           </button>
         </div>
 
-        <div className="p-4 bg-[#080b16] border border-emerald-500/35 rounded-xl space-y-2.5 text-xs">
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+        <div className="bg-[#080b16] border border-emerald-500/35 rounded-2xl px-4 py-1 divide-y divide-slate-800/80 text-xs">
+          <div className="flex items-center justify-between py-2.5">
             <span className="text-slate-400">Số báo danh (SBD):</span>
             <div className="flex items-center gap-1.5">
-              <span className="font-mono tabular-nums font-bold text-base text-blue-400">
+              <span className="font-mono tabular-nums font-extrabold text-base text-blue-400">
                 {createdStudent.sbd}
               </span>
               <button
                 type="button"
                 onClick={() => handleCopy('sbd', createdStudent.sbd)}
-                className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-500 hover:text-blue-400 transition cursor-pointer"
+                className="p-1 text-slate-500 hover:text-blue-400 transition cursor-pointer"
                 title="Sao chép SBD"
               >
                 {copiedKey === 'sbd' ? (
@@ -210,19 +210,19 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div className="flex items-center justify-between py-2.5">
             <span className="text-slate-400">Thời gian đăng ký:</span>
-            <span className="font-mono tabular-nums text-slate-200">
+            <span className="font-mono tabular-nums text-white font-semibold">
               {createdStudent.registeredAt || 'Vừa xong'}
             </span>
           </div>
 
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div className="flex items-center justify-between py-2.5">
             <span className="text-slate-400">Họ và tên:</span>
-            <span className="font-semibold text-white">{createdStudent.hoten}</span>
+            <span className="font-bold text-white">{createdStudent.hoten}</span>
           </div>
 
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div className="flex items-center justify-between py-2.5">
             <span className="text-slate-400">Tài khoản (SĐT):</span>
             <div className="flex items-center gap-1.5">
               <span className="font-mono tabular-nums font-bold text-emerald-400">
@@ -231,7 +231,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
               <button
                 type="button"
                 onClick={() => handleCopy('user', createdStudent.username)}
-                className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-500 hover:text-emerald-400 transition cursor-pointer"
+                className="p-1 text-slate-500 hover:text-emerald-400 transition cursor-pointer"
                 title="Sao chép tài khoản"
               >
                 {copiedKey === 'user' ? (
@@ -243,23 +243,23 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div className="flex items-center justify-between py-2.5">
             <span className="text-slate-400">Mật khẩu:</span>
             <span className="font-mono font-bold text-emerald-400">
-              {createdStudent.password}
+              {password.trim() || 'Đã thiết lập'}
             </span>
           </div>
 
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 gap-3">
+          <div className="flex items-center justify-between py-2.5 gap-3">
             <span className="text-slate-400 shrink-0">Năm sinh · Email:</span>
-            <span className="text-slate-300 truncate text-right">
+            <span className="text-slate-200 truncate text-right">
               {createdStudent.namsinh} · {createdStudent.email}
             </span>
           </div>
 
-          <div className="pt-0.5 flex items-start justify-between gap-3">
+          <div className="py-2.5 flex items-start justify-between gap-3">
             <span className="text-slate-400 shrink-0">Kỳ thi đã chọn:</span>
-            <span className="text-blue-300 font-semibold text-right">
+            <span className="text-blue-400 font-bold text-right">
               {registeredList || 'Chưa chọn'}
             </span>
           </div>
@@ -269,9 +269,9 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
           type="button"
           id="btn-register-login-now"
           onClick={() => onRegisterSuccessLogin(createdStudent)}
-          className="w-full min-h-[48px] py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition text-sm flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full min-h-[46px] py-2.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/25 transition text-sm flex items-center justify-center gap-2 cursor-pointer"
         >
-          <LogIn className="w-4 h-4" />
+          <LogIn className="w-4 h-4 shrink-0" />
           <span>Đăng nhập ngay vào hệ thống</span>
         </button>
       </div>
@@ -280,20 +280,21 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
 
   return (
     <div id="register-section" className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 className="text-base sm:text-lg font-bold text-white">
-            Đăng ký tài khoản thi thử
+          <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+            <UserPlus className="w-4 h-4 text-amber-400" />
+            <span>Đăng ký Tài khoản Thi thử</span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Tạo tài khoản và nhận Số Báo Danh 5 số ngay lập tức.
+            Tạo tài khoản mới và nhận Số Báo Danh 5 số ngay lập tức.
           </p>
         </div>
         <button
           type="button"
           id="btn-register-back-login"
           onClick={onBackToLogin}
-          className="min-h-[36px] text-xs text-slate-400 hover:text-white transition flex items-center gap-1 cursor-pointer shrink-0"
+          className="text-xs text-slate-400 hover:text-white transition flex items-center gap-1 cursor-pointer shrink-0"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>Đăng nhập</span>
@@ -301,8 +302,8 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
       </div>
 
       {!hasAnyOpenExam && (
-        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+        <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/35 text-amber-200 text-xs flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <span>
             Cổng đăng ký tài khoản hiện đang tạm đóng trên hệ thống cấu hình. Vui lòng quay lại sau hoặc đăng nhập bằng tài khoản đã cấp.
           </span>
@@ -310,12 +311,11 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
-        {/* SĐT & Mật khẩu */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label
               htmlFor="reg-phone"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
+              className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
             >
               Số điện thoại (Tài khoản)
             </label>
@@ -330,8 +330,8 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                   setPhone(e.target.value);
                   if (errorMessage) setErrorMessage(null);
                 }}
-                placeholder="VD: 0912345678"
-                className="w-full min-h-[46px] pl-10 pr-3 py-2.5 bg-[#080b16] border border-slate-800 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono tabular-nums"
+                placeholder="0912345678"
+                className="w-full min-h-[44px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono tabular-nums transition"
               />
             </div>
           </div>
@@ -339,7 +339,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
           <div>
             <label
               htmlFor="reg-password"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
+              className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
             >
               Mật khẩu đăng nhập
             </label>
@@ -354,13 +354,13 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                   setPassword(e.target.value);
                   if (errorMessage) setErrorMessage(null);
                 }}
-                placeholder="Từ 4 ký tự..."
-                className="w-full min-h-[46px] pl-10 pr-11 py-2.5 bg-[#080b16] border border-slate-800 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono"
+                placeholder="Từ 4 ký tự trở lên"
+                className="w-full min-h-[44px] pl-10 pr-11 py-2 bg-[#080b16] border border-slate-700/80 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono transition"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-500 hover:text-slate-200 cursor-pointer"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-500 hover:text-slate-200 cursor-pointer"
               >
                 {showPassword ? (
                   <EyeOff className="w-4 h-4" />
@@ -372,11 +372,10 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
           </div>
         </div>
 
-        {/* Họ và tên */}
         <div>
           <label
             htmlFor="reg-hoten"
-            className="block text-xs font-semibold text-slate-300 mb-1.5"
+            className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
           >
             Họ và tên thí sinh
           </label>
@@ -391,18 +390,17 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                 setHoten(e.target.value);
                 if (errorMessage) setErrorMessage(null);
               }}
-              placeholder="VD: Nguyễn Văn An"
-              className="w-full min-h-[46px] pl-10 pr-3 py-2.5 bg-[#080b16] border border-slate-800 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600"
+              placeholder="Nguyễn Văn An"
+              className="w-full min-h-[44px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 transition"
             />
           </div>
         </div>
 
-        {/* Email & Năm sinh */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="sm:col-span-2">
             <label
               htmlFor="reg-email"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
+              className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
             >
               Email nhận thông báo
             </label>
@@ -418,7 +416,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                   if (errorMessage) setErrorMessage(null);
                 }}
                 placeholder="name@gmail.com"
-                className="w-full min-h-[46px] pl-10 pr-3 py-2.5 bg-[#080b16] border border-slate-800 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600"
+                className="w-full min-h-[44px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 transition"
               />
             </div>
           </div>
@@ -426,7 +424,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
           <div>
             <label
               htmlFor="reg-namsinh"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
+              className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5"
             >
               Năm sinh
             </label>
@@ -444,25 +442,24 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                   if (errorMessage) setErrorMessage(null);
                 }}
                 placeholder="2009"
-                className="w-full min-h-[46px] pl-10 pr-3 py-2.5 bg-[#080b16] border border-slate-800 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono tabular-nums"
+                className="w-full min-h-[44px] pl-10 pr-3 py-2 bg-[#080b16] border border-slate-700/80 focus:border-amber-500 rounded-xl text-white text-base sm:text-sm outline-none placeholder:text-slate-600 font-mono tabular-nums transition"
               />
             </div>
           </div>
         </div>
 
-        {/* Kỳ thi mở đăng ký theo Trang tính 4 */}
         {hasAnyOpenExam && (
           <div className="pt-1 space-y-2">
-            <span className="block text-xs font-semibold text-slate-300">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">
               Chọn kỳ thi &amp; mục tham gia
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {regConfig.enableHsa && (
                 <label
-                  className={`min-h-[46px] flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-xs cursor-pointer transition select-none ${
+                  className={`min-h-[44px] flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs cursor-pointer transition select-none ${
                     pickHsa
                       ? 'bg-blue-600/20 border-blue-500/60 text-white'
-                      : 'bg-[#080b16] border-slate-800 text-slate-300 hover:border-slate-600'
+                      : 'bg-[#080b16] border-slate-800 text-slate-300 hover:border-slate-700'
                   }`}
                 >
                   <input
@@ -477,10 +474,10 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
 
               {regConfig.enableVact && (
                 <label
-                  className={`min-h-[46px] flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-xs cursor-pointer transition select-none ${
+                  className={`min-h-[44px] flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs cursor-pointer transition select-none ${
                     pickVact
                       ? 'bg-emerald-600/20 border-emerald-500/60 text-white'
-                      : 'bg-[#080b16] border-slate-800 text-slate-300 hover:border-slate-600'
+                      : 'bg-[#080b16] border-slate-800 text-slate-300 hover:border-slate-700'
                   }`}
                 >
                   <input
@@ -495,10 +492,10 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
 
               {regConfig.enableThptqg && (
                 <label
-                  className={`min-h-[46px] flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-xs cursor-pointer transition select-none ${
+                  className={`min-h-[44px] flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs cursor-pointer transition select-none ${
                     pickThptqg
                       ? 'bg-purple-600/20 border-purple-500/60 text-white'
-                      : 'bg-[#080b16] border-slate-800 text-slate-300 hover:border-slate-600'
+                      : 'bg-[#080b16] border-slate-800 text-slate-300 hover:border-slate-700'
                   }`}
                 >
                   <input
@@ -513,10 +510,10 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
 
               {regConfig.enableHuongnghiep && (
                 <label
-                  className={`min-h-[46px] flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-xs cursor-pointer transition select-none ${
+                  className={`min-h-[44px] flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs cursor-pointer transition select-none ${
                     pickHuongnghiep
                       ? 'bg-fuchsia-600/20 border-fuchsia-500/60 text-white'
-                      : 'bg-[#080b16] border-slate-800 text-slate-300 hover:border-slate-600'
+                      : 'bg-[#080b16] border-slate-800 text-slate-300 hover:border-slate-700'
                   }`}
                 >
                   <input
@@ -533,7 +530,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
         )}
 
         {errorMessage && (
-          <div className="flex items-start gap-2 text-rose-300 text-xs bg-rose-500/10 border border-rose-500/25 p-3 rounded-xl">
+          <div className="flex items-start gap-2 text-rose-300 text-xs bg-rose-950/50 border border-rose-500/35 p-3 rounded-xl">
             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <span>{errorMessage}</span>
           </div>
@@ -543,7 +540,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
           type="submit"
           id="btn-register-submit"
           disabled={isSubmitting || !hasAnyOpenExam}
-          className="w-full min-h-[48px] py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full min-h-[46px] py-2.5 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold rounded-xl shadow-lg shadow-amber-600/25 transition text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isSubmitting ? (
             <>

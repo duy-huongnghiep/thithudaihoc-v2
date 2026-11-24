@@ -30,6 +30,7 @@ export interface SheetGlobalConfig {
 export interface StudentInfo {
   username: string;
   password: string;
+  hasPassword?: boolean;
   sbd: string;
   hoten: string;
   email: string;
@@ -45,6 +46,7 @@ export interface StudentInfo {
   sourceZone?: 'sheet3_manual' | 'sheet3_web' | 'sheet1';
   rowNumber?: number;
   isAdmin?: boolean;
+  role?: 'admin' | 'student';
   adminPermissions?: AdminPermissions;
 }
 
