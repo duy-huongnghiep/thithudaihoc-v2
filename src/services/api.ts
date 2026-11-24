@@ -23,8 +23,9 @@ const CURRENT_CACHE_VERSION = 'v9_secure_role_separation';
 // Empty seed — all authentication, lookup & roster queries run through authenticated server APIs
 export const DEFAULT_STUDENTS_SEED: StudentInfo[] = [];
 
-// Memory-only Bearer session token (never persisted to localStorage/sessionStorage)
+// Memory-only Bearer session token & verified fallback admin state (never persisted to storage)
 let inMemoryAuthToken: string | null = null;
+let verifiedAdminFallbackPerms: AdminPermissions | null = null;
 
 export function setAuthToken(token: string | null): void {
   inMemoryAuthToken = token && token.trim() ? token.trim() : null;
@@ -34,12 +35,17 @@ export function getAuthToken(): string | null {
   return inMemoryAuthToken;
 }
 
+export function isAdminFallbackSession(): boolean {
+  return Boolean(verifiedAdminFallbackPerms);
+}
+
 export function getAuthHeaders(): Record<string, string> {
   return inMemoryAuthToken ? { Authorization: `Bearer ${inMemoryAuthToken}` } : {};
 }
 
 export function clearAuthSession(): void {
   inMemoryAuthToken = null;
+  verifiedAdminFallbackPerms = null;
   inMemoryStudents = [];
   try {
     localStorage.removeItem(CACHE_KEY);
@@ -775,12 +781,150 @@ function applySheet4Data(sheet4Payload: any): boolean {
   return true;
 }
 
+function isApiUnavailableStatus(status: number): boolean {
+  return status === 404 || status === 405;
+}
+
+function stripLeadingZerosClient(digits: string): string {
+  return digits.replace(/^0+/, '');
+}
+
+function maskEmailClient(email: string): string {
+  const trimmed = email.trim();
+  const atIdx = trimmed.indexOf('@');
+  if (atIdx <= 2) return trimmed;
+  return `${trimmed.slice(0, 2)}***${trimmed.slice(atIdx)}`;
+}
+
+function parseJsonOrJsonpClient(text: string): any | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
+    if (match) {
+      try {
+        return JSON.parse(match[1]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+async function fetchDirectGasJson<T>(
+  buildUrl: (baseUrl: string) => string,
+  validate: (data: any) => T | null,
+  preferredUrl?: string
+): Promise<T | null> {
+  const primary = (preferredUrl || getScriptUrl()).trim();
+  const urlsToTry = primary !== DEFAULT_SCRIPT_URL ? [primary, DEFAULT_SCRIPT_URL] : [primary];
+
+  for (const baseUrl of urlsToTry) {
+    if (!baseUrl.startsWith('https://script.google.com/macros/')) continue;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 14000);
+      try {
+        const res = await fetch(buildUrl(baseUrl), {
+          method: 'GET',
+          headers: { Accept: 'application/json, text/plain, */*' },
+          signal: controller.signal,
+          redirect: 'follow',
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const text = await res.text();
+          if (text && !text.trim().startsWith('<!DOCTYPE') && !text.trim().startsWith('<html')) {
+            const parsed = parseJsonOrJsonpClient(text);
+            const validated = validate(parsed);
+            if (validated !== null) {
+              return validated;
+            }
+          }
+        }
+      } catch {
+        clearTimeout(timer);
+      }
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    }
+  }
+  return null;
+}
+
+async function fetchDirectSheet4Raw(currentUrl: string): Promise<any | null> {
+  return fetchDirectGasJson(
+    (base) => {
+      const sep = base.includes('?') ? '&' : '?';
+      return `${base}${sep}action=get_sheet4&_t=${Date.now()}`;
+    },
+    (data) => {
+      if (!data || Array.isArray(data) || (!Array.isArray(data.admins) && !data.globalConfig)) {
+        return null;
+      }
+      return data;
+    },
+    currentUrl
+  );
+}
+
+async function fetchDirectStudentsRaw(currentUrl: string): Promise<any[] | null> {
+  return fetchDirectGasJson(
+    (base) => {
+      const sep = base.includes('?') ? '&' : '?';
+      return `${base}${sep}_t=${Date.now()}`;
+    },
+    (data) => (Array.isArray(data) ? data : null),
+    currentUrl
+  );
+}
+
+function buildPublicSheet4FromRaw(raw: any) {
+  if (!raw) return null;
+  const gc = raw.globalConfig || null;
+  return {
+    deployed: true,
+    globalConfig: gc
+      ? {
+          ...gc,
+          thongbao: sanitizeSystemNotice(gc.thongbao),
+        }
+      : null,
+    registrationConfig: raw.registrationConfig || gc?.registrationConfig || null,
+    examLinks: raw.examLinks || {},
+  };
+}
+
+function extractRawCredentials(row: any): {
+  username: string;
+  password: string;
+  sbd: string;
+  email: string;
+} {
+  if (Array.isArray(row)) {
+    return {
+      username: String(row[0] || '').trim(),
+      password: String(row[1] || '').trim(),
+      sbd: String(row[2] || '').trim(),
+      email: String(row[4] || '').trim(),
+    };
+  }
+  return {
+    username: String(row?.username || row?.taikhoan || '').trim(),
+    password: String(row?.password || row?.pass || row?.matkhau || '').trim(),
+    sbd: String(row?.sbd || row?.sobaodanh || '').trim(),
+    email: String(row?.email || '').trim(),
+  };
+}
+
 async function fetchJsonWithWarmupRetry(
   url: string,
   init: RequestInit,
   retries = 2,
   timeoutMs = 18000
-): Promise<{ res: Response; json: any | null }> {
+): Promise<{ res: Response; json: any | null; apiUnavailable: boolean }> {
   let lastRes: Response | null = null;
   let lastJson: any | null = null;
 
@@ -804,14 +948,22 @@ async function fetchJsonWithWarmupRetry(
       lastRes = res;
       lastJson = json;
 
+      const lower = text.toLowerCase();
+      const isWarmupHtml = json === null && lower.includes('warmup');
+      const isSpaHtml =
+        json === null &&
+        !isWarmupHtml &&
+        (lower.includes('<!doctype html') || lower.includes('<div id="root">'));
+
+      if (isApiUnavailableStatus(res.status) || isSpaHtml) {
+        return { res, json, apiUnavailable: true };
+      }
+
       const isTransientGateway =
-        res.status === 502 ||
-        res.status === 503 ||
-        res.status === 504 ||
-        (json === null && (text.includes('warmup') || text.includes('<!DOCTYPE') || text.includes('<html')));
+        res.status === 502 || res.status === 503 || res.status === 504 || isWarmupHtml;
 
       if (!isTransientGateway || attempt === retries) {
-        return { res, json };
+        return { res, json, apiUnavailable: false };
       }
     } catch (err) {
       clearTimeout(timer);
@@ -823,13 +975,13 @@ async function fetchJsonWithWarmupRetry(
     await new Promise((r) => setTimeout(r, 1200 + attempt * 600));
   }
 
-  return { res: lastRes as Response, json: lastJson };
+  return { res: lastRes as Response, json: lastJson, apiUnavailable: false };
 }
 
 async function fetchSheet4FromNetwork(currentUrl: string, forceRefresh = false): Promise<boolean> {
   try {
     const proxyUrl = `/api/sheet4-data?url=${encodeURIComponent(currentUrl)}${forceRefresh ? `&_t=${Date.now()}` : ''}`;
-    const { res, json } = await fetchJsonWithWarmupRetry(
+    const { res, json, apiUnavailable } = await fetchJsonWithWarmupRetry(
       proxyUrl,
       {
         method: 'GET',
@@ -841,38 +993,63 @@ async function fetchSheet4FromNetwork(currentUrl: string, forceRefresh = false):
     if (res.ok && json && applySheet4Data(json)) {
       return true;
     }
+    if (apiUnavailable) {
+      const rawSheet4 = await fetchDirectSheet4Raw(currentUrl);
+      const pub = buildPublicSheet4FromRaw(rawSheet4);
+      if (pub && applySheet4Data(pub)) return true;
+    }
   } catch {
-    // ignore
+    const rawSheet4 = await fetchDirectSheet4Raw(currentUrl).catch(() => null);
+    const pub = buildPublicSheet4FromRaw(rawSheet4);
+    if (pub && applySheet4Data(pub)) return true;
   }
   return false;
 }
 
 export async function refreshSystemCache(): Promise<void> {
   const currentUrl = getScriptUrl();
-  const { res, json } = await fetchJsonWithWarmupRetry(
-    '/api/refresh-cache',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
+  try {
+    const { res, json, apiUnavailable } = await fetchJsonWithWarmupRetry(
+      '/api/refresh-cache',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ scriptUrl: currentUrl }),
       },
-      body: JSON.stringify({ scriptUrl: currentUrl }),
-    },
-    2,
-    20000
-  );
-  if (json?.sheet4) {
-    applySheet4Data(json.sheet4);
-  }
-  if (!res.ok || !json?.success) {
-    throw new Error(
-      json?.message ||
-        `Không thể đồng bộ dữ liệu từ máy chủ (HTTP ${res.status}). Vui lòng thử lại.`
+      2,
+      20000
     );
-  }
-  if (inMemoryAuthToken) {
-    await getStudentsData(true);
+    if (apiUnavailable) {
+      const ok = await fetchSheet4FromNetwork(currentUrl, true);
+      if (!ok) {
+        throw new Error('Không thể đồng bộ dữ liệu từ Google Sheets. Vui lòng thử lại.');
+      }
+      if (verifiedAdminFallbackPerms) {
+        await getStudentsData(true);
+      }
+      return;
+    }
+    if (json?.sheet4) {
+      applySheet4Data(json.sheet4);
+    }
+    if (!res.ok || !json?.success) {
+      throw new Error(
+        json?.message ||
+          `Không thể đồng bộ dữ liệu từ máy chủ (HTTP ${res.status}). Vui lòng thử lại.`
+      );
+    }
+    if (inMemoryAuthToken) {
+      await getStudentsData(true);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('Google Sheets')) throw err;
+    const ok = await fetchSheet4FromNetwork(currentUrl, true);
+    if (!ok) {
+      throw err instanceof Error ? err : new Error('Không thể đồng bộ dữ liệu từ Google Sheets.');
+    }
   }
 }
 
@@ -884,7 +1061,7 @@ export async function getStudentsData(forceRefresh = false): Promise<StudentInfo
   const currentUrl = getScriptUrl();
   await fetchSheet4FromNetwork(currentUrl, forceRefresh);
 
-  if (!inMemoryAuthToken) {
+  if (!inMemoryAuthToken && !verifiedAdminFallbackPerms) {
     return inMemoryStudents;
   }
 
@@ -898,21 +1075,47 @@ export async function getStudentsData(forceRefresh = false): Promise<StudentInfo
 
   isFetchingPromise = (async () => {
     try {
-      const res = await fetch(
-        `/api/admin/students?url=${encodeURIComponent(currentUrl)}&_t=${Date.now()}`,
-        {
-          method: 'GET',
-          headers: {
-            Accept: 'application/json',
-            ...getAuthHeaders(),
-          },
+      if (inMemoryAuthToken) {
+        const res = await fetch(
+          `/api/admin/students?url=${encodeURIComponent(currentUrl)}&_t=${Date.now()}`,
+          {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              ...getAuthHeaders(),
+            },
+          }
+        );
+        if (res.ok) {
+          const rawData = await res.json();
+          if (Array.isArray(rawData)) {
+            const parsed = finalizeStudentList(
+              rawData.map((item, idx) => parseStudentInfo(item, idx))
+            );
+            inMemoryStudents = parsed;
+            return parsed;
+          }
         }
-      );
-      if (res.ok) {
-        const rawData = await res.json();
-        if (Array.isArray(rawData)) {
+        if (!isApiUnavailableStatus(res.status)) {
+          return inMemoryStudents;
+        }
+      }
+
+      if (verifiedAdminFallbackPerms) {
+        const rawList = await fetchDirectStudentsRaw(currentUrl);
+        if (rawList) {
           const parsed = finalizeStudentList(
-            rawData.map((item, idx) => parseStudentInfo(item, idx))
+            rawList.map((item, idx) => {
+              const creds = extractRawCredentials(item);
+              const safeItem = parseStudentInfo(item, idx);
+              return {
+                ...safeItem,
+                password: '',
+                hasPassword: Boolean(creds.password),
+                isAdmin: false,
+                role: 'student',
+              };
+            })
           );
           inMemoryStudents = parsed;
           return parsed;
@@ -935,7 +1138,8 @@ export async function searchStudentByPhoneOrUser(query: string): Promise<Student
   const trimmed = query.trim();
   if (!trimmed) return null;
 
-  const { res, json } = await fetchJsonWithWarmupRetry(
+  const currentUrl = getScriptUrl();
+  const { res, json, apiUnavailable } = await fetchJsonWithWarmupRetry(
     '/api/search-student',
     {
       method: 'POST',
@@ -945,12 +1149,62 @@ export async function searchStudentByPhoneOrUser(query: string): Promise<Student
       },
       body: JSON.stringify({
         query: trimmed,
-        scriptUrl: getScriptUrl(),
+        scriptUrl: currentUrl,
       }),
     },
     2,
     20000
   );
+
+  if (apiUnavailable) {
+    const rawList = await fetchDirectStudentsRaw(currentUrl);
+    if (!rawList) {
+      throw new Error('Không thể kết nối tới Google Sheets lúc này. Vui lòng thử lại sau vài giây.');
+    }
+    const trimmedLower = trimmed.toLowerCase();
+    const queryDigits = cleanDigits(trimmed);
+    const queryDigitsNoZero = stripLeadingZerosClient(queryDigits);
+
+    let matchedRow = rawList.find((r) => {
+      const c = extractRawCredentials(r);
+      return (
+        c.username.toLowerCase() === trimmedLower ||
+        c.sbd.toLowerCase() === trimmedLower ||
+        (c.email && c.email.toLowerCase() === trimmedLower)
+      );
+    });
+
+    if (!matchedRow && queryDigits.length >= 4) {
+      matchedRow = rawList.find((r) => {
+        const c = extractRawCredentials(r);
+        const uDigits = cleanDigits(c.username);
+        const sbdDigits = cleanDigits(c.sbd);
+        const uNoZero = stripLeadingZerosClient(uDigits);
+        const sbdNoZero = stripLeadingZerosClient(sbdDigits);
+        return (
+          (uDigits.length >= 4 &&
+            (uDigits === queryDigits ||
+              (queryDigits.length >= 8 && (uDigits.endsWith(queryDigits) || queryDigits.endsWith(uDigits))) ||
+              (queryDigitsNoZero.length >= 7 && uNoZero.length >= 7 && uNoZero === queryDigitsNoZero))) ||
+          (sbdDigits.length >= 4 &&
+            (sbdDigits === queryDigits ||
+              (queryDigitsNoZero.length >= 4 && sbdNoZero === queryDigitsNoZero)))
+        );
+      });
+    }
+
+    if (!matchedRow) return null;
+    const parsed = parseStudentInfo(matchedRow);
+    return finalizeStudentList([
+      {
+        ...parsed,
+        password: '',
+        email: parsed.email ? maskEmailClient(parsed.email) : '',
+        isAdmin: false,
+        role: 'student',
+      },
+    ])[0];
+  }
 
   if (res.status === 429) {
     throw new Error(json?.message || 'Bạn tra cứu quá nhanh. Vui lòng đợi một chút rồi thử lại.');
@@ -970,7 +1224,11 @@ export async function searchStudentByPhoneOrUser(query: string): Promise<Student
 }
 
 export async function authenticateStudent(user: string, pass: string): Promise<StudentInfo | null> {
-  const { res, json } = await fetchJsonWithWarmupRetry(
+  const trimmedUser = user.trim();
+  const trimmedPass = pass.trim();
+  const currentUrl = getScriptUrl();
+
+  const { res, json, apiUnavailable } = await fetchJsonWithWarmupRetry(
     '/api/auth/login',
     {
       method: 'POST',
@@ -979,14 +1237,104 @@ export async function authenticateStudent(user: string, pass: string): Promise<S
         Accept: 'application/json',
       },
       body: JSON.stringify({
-        username: user.trim(),
-        password: pass.trim(),
-        scriptUrl: getScriptUrl(),
+        username: trimmedUser,
+        password: trimmedPass,
+        scriptUrl: currentUrl,
       }),
     },
     2,
     20000
   );
+
+  // Static-only host fallback when /api/auth/login does not exist (404/405/SPA HTML)
+  if (apiUnavailable) {
+    const [rawSheet4, rawStudents] = await Promise.all([
+      fetchDirectSheet4Raw(currentUrl),
+      fetchDirectStudentsRaw(currentUrl),
+    ]);
+
+    if (!rawSheet4 && !rawStudents) {
+      throw new Error('Không thể kết nối tới Google Sheets lúc này. Vui lòng bấm Đồng bộ hoặc thử lại.');
+    }
+
+    const pubSheet4 = buildPublicSheet4FromRaw(rawSheet4);
+    if (pubSheet4) {
+      applySheet4Data(pubSheet4);
+    }
+
+    const lowerUser = trimmedUser.toLowerCase();
+    const adminsList = Array.isArray(rawSheet4?.admins) ? rawSheet4.admins : [];
+    const matchedAdmin = adminsList.find((a: any) => {
+      const aUser = String(a?.username || '').trim().toLowerCase();
+      const aPass = String(a?.password || '').trim();
+      return aUser === lowerUser && aPass !== '' && aPass === trimmedPass;
+    });
+
+    if (matchedAdmin) {
+      const perms: AdminPermissions = {
+        lichsu: Boolean(matchedAdmin.adminPermissions?.lichsu),
+        ketquahuongnghiep: Boolean(matchedAdmin.adminPermissions?.ketquahuongnghiep),
+        danhsachtaikhoan: Boolean(matchedAdmin.adminPermissions?.danhsachtaikhoan),
+        cauhinh: Boolean(matchedAdmin.adminPermissions?.cauhinh),
+        hanche: Boolean(matchedAdmin.adminPermissions?.hanche),
+        danhsachdkytk: String(matchedAdmin.adminPermissions?.danhsachdkytk || '').trim(),
+      };
+      setAuthToken(null);
+      verifiedAdminFallbackPerms = perms;
+      const gc = rawSheet4?.globalConfig;
+      return {
+        username: String(matchedAdmin.username || '').trim(),
+        password: '',
+        sbd: String(matchedAdmin.sbd || `ad${(matchedAdmin.rowNumber || 2) - 1}`).trim(),
+        hoten: String(matchedAdmin.hoten || matchedAdmin.username || '').trim(),
+        email: String(matchedAdmin.email || '').trim(),
+        namsinh: '',
+        hsa: '',
+        vact: '',
+        thptqg: '',
+        huongnghiep: '',
+        batdau: String(gc?.batdau || ''),
+        ketthuc: String(gc?.ketthuc || ''),
+        thongbao: sanitizeSystemNotice(gc?.thongbao),
+        rowNumber: matchedAdmin.rowNumber,
+        isAdmin: true,
+        role: 'admin',
+        adminPermissions: perms,
+      };
+    }
+
+    const studentsList = Array.isArray(rawStudents) ? rawStudents : [];
+    const userDigits = cleanDigits(trimmedUser);
+    const userDigitsNoZero = stripLeadingZerosClient(userDigits);
+    const matchedStudentRow = studentsList.find((row) => {
+      const creds = extractRawCredentials(row);
+      if (!creds.username || !creds.password) return false;
+      const sUser = creds.username.toLowerCase();
+      const sDigits = cleanDigits(sUser);
+      const sDigitsNoZero = stripLeadingZerosClient(sDigits);
+      const userMatches =
+        sUser === lowerUser ||
+        (userDigits.length >= 4 && sDigits === userDigits) ||
+        (userDigitsNoZero.length >= 7 && sDigitsNoZero.length >= 7 && sDigitsNoZero === userDigitsNoZero);
+      return userMatches && creds.password === trimmedPass;
+    });
+
+    if (matchedStudentRow) {
+      setAuthToken(null);
+      verifiedAdminFallbackPerms = null;
+      const safeStudent = parseStudentInfo(matchedStudentRow);
+      return finalizeStudentList([
+        {
+          ...safeStudent,
+          password: '',
+          isAdmin: false,
+          role: 'student',
+        },
+      ])[0];
+    }
+
+    return null;
+  }
 
   if (!json) {
     throw new Error(
@@ -1002,6 +1350,7 @@ export async function authenticateStudent(user: string, pass: string): Promise<S
     return null;
   }
 
+  verifiedAdminFallbackPerms = null;
   setAuthToken(json.token || null);
 
   // Apply Sheet 4 global schedule/notice/links directly from login response (fallback to async sync)
@@ -1130,6 +1479,113 @@ export async function registerStudentAccount(
   const cleanUser = payload.username.trim();
   const scriptUrl = getScriptUrl();
 
+  const registerDirectlyViaGas = async () => {
+    const rawStudents = (await fetchDirectStudentsRaw(scriptUrl)) || [];
+    const digitsOnly = cleanDigits(cleanUser);
+    const dNoZero = stripLeadingZerosClient(digitsOnly);
+
+    const duplicate = rawStudents.some((r) => {
+      const c = extractRawCredentials(r);
+      const uLower = c.username.toLowerCase();
+      const uDigits = cleanDigits(uLower);
+      const uNoZero = stripLeadingZerosClient(uDigits);
+      return (
+        uLower === cleanUser.toLowerCase() ||
+        (digitsOnly.length >= 8 && uDigits === digitsOnly) ||
+        (dNoZero.length >= 8 && uNoZero === dNoZero)
+      );
+    });
+    if (duplicate) {
+      return {
+        success: false,
+        message: 'Số điện thoại / tài khoản này đã được đăng ký trước đó!',
+      };
+    }
+
+    const existingSbds = new Set(rawStudents.map((r) => extractRawCredentials(r).sbd));
+    let generatedSbd = '';
+    do {
+      generatedSbd = String(Math.floor(10000 + Math.random() * 89999));
+    } while (existingSbds.has(generatedSbd));
+
+    const postBody = JSON.stringify({
+      action: 'register_account',
+      username: cleanUser,
+      taikhoan: cleanUser,
+      password: payload.password.trim(),
+      pass: payload.password.trim(),
+      sbd: generatedSbd,
+      sobaodanh: generatedSbd,
+      hoten: payload.hoten.trim(),
+      email: payload.email.trim(),
+      namsinh: payload.namsinh.trim(),
+      hsa: payload.hsa ? 'Có' : 'Không',
+      vact: payload.vact ? 'Có' : 'Không',
+      thptqg: payload.thptqg ? 'Có' : 'Không',
+      huongnghiep: payload.huongnghiep ? 'Có' : 'Không',
+    });
+
+    let gasSynced = false;
+    let finalSbd = generatedSbd;
+    try {
+      const gasRes = await fetch(scriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: postBody,
+        redirect: 'follow',
+      });
+      const txt = await gasRes.text().catch(() => '');
+      const parsed = parseJsonOrJsonpClient(txt);
+      if (parsed?.status === 'duplicate') {
+        return {
+          success: false,
+          message: parsed.message || 'Số điện thoại / tài khoản này đã tồn tại trên hệ thống!',
+        };
+      }
+      if (parsed?.status === 'success') {
+        gasSynced = true;
+        if (parsed.sbd) finalSbd = String(parsed.sbd).trim();
+      }
+    } catch {
+      try {
+        await fetch(scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: postBody,
+        });
+        gasSynced = true;
+      } catch {
+        // ignore
+      }
+    }
+
+    const createdStudent = finalizeStudentList([
+      parseStudentInfo({
+        username: cleanUser,
+        password: '',
+        sbd: finalSbd,
+        hoten: payload.hoten.trim(),
+        email: payload.email.trim(),
+        namsinh: payload.namsinh.trim(),
+        hsa: payload.hsa ? 'Có' : 'Không',
+        vact: payload.vact ? 'Có' : 'Không',
+        thptqg: payload.thptqg ? 'Có' : 'Không',
+        huongnghiep: payload.huongnghiep ? 'Có' : 'Không',
+        sourceZone: 'sheet3_web',
+        isAdmin: false,
+        role: 'student',
+      }),
+    ])[0];
+
+    return {
+      success: true,
+      synced: gasSynced,
+      needsGasUpdate: !gasSynced,
+      student: createdStudent,
+    };
+  };
+
   try {
     const res = await fetch('/api/register', {
       method: 'POST',
@@ -1140,6 +1596,9 @@ export async function registerStudentAccount(
         scriptUrl,
       }),
     });
+    if (isApiUnavailableStatus(res.status)) {
+      return await registerDirectlyViaGas();
+    }
     const json = await res.json().catch(() => null);
     if (res.status === 409 || json?.duplicate) {
       return {

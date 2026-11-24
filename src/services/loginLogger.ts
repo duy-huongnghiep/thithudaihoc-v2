@@ -1,5 +1,5 @@
 import { StudentInfo, LoginLogRecord, CareerResultRecord } from '../types';
-import { isYes, getScriptUrl, getAuthHeaders } from './api';
+import { isYes, getScriptUrl, getAuthHeaders, isAdminFallbackSession } from './api';
 
 const STORAGE_LOGIN_LOGS_KEY = 'td_mock_exam_login_logs';
 const STORAGE_CAREER_RESULTS_KEY = 'td_mock_exam_career_results';
@@ -109,11 +109,38 @@ export async function fetchSheet2Logs(): Promise<LoginLogRecord[]> {
         return data as LoginLogRecord[];
       }
     }
+    if ((res.status === 404 || res.status === 405) && isAdminFallbackSession()) {
+      const sep = scriptUrl.includes('?') ? '&' : '?';
+      const gasRes = await fetch(`${scriptUrl}${sep}action=get_sheet2&sheet=2&_t=${Date.now()}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json, text/plain, */*' },
+      });
+      if (gasRes.ok) {
+        const parsed = await gasRes.json().catch(() => null);
+        if (Array.isArray(parsed)) {
+          const remote: LoginLogRecord[] = parsed.map((item: any, idx: number) => ({
+            id: `gas_log_${idx}`,
+            timestamp: String(item.time || item.timestamp || '').trim(),
+            isoDate: item.isoDate || new Date().toISOString(),
+            hoten: item.hoten || '',
+            sbd: item.sbd || '',
+            username: item.username || '',
+            email: item.email || '',
+            namsinh: item.namsinh || '',
+            monthi: item.monthi || '',
+            device: item.device || '',
+            status: item.status || 'Đăng nhập thành công',
+            synced: true,
+          }));
+          return [...getLoginLogs(), ...remote];
+        }
+      }
+    }
   } catch {
     // ignore network failure
   }
 
-  return getLoginLogs();
+  return isAdminFallbackSession() ? getLoginLogs() : [];
 }
 
 /**
@@ -200,6 +227,14 @@ export async function recordLoginToSheet2(student: StudentInfo): Promise<LoginLo
       body: JSON.stringify(payload),
     });
     if (res.ok) {
+      record.synced = true;
+    } else if (res.status === 404 || res.status === 405) {
+      await fetch(getScriptUrl(), {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
       record.synced = true;
     }
   } catch {
@@ -423,6 +458,8 @@ export async function recordCareerResultToSheet(
     if (res.ok) {
       const json = await res.json();
       record.synced = Boolean(json?.success);
+    } else {
+      throw new Error(`HTTP ${res.status}`);
     }
   } catch {
     // Backup direct client no-cors POST if backend proxy is unavailable
@@ -490,11 +527,44 @@ export async function fetchCareerResults(): Promise<CareerResultRecord[]> {
         return data as CareerResultRecord[];
       }
     }
+    if ((res.status === 404 || res.status === 405) && isAdminFallbackSession()) {
+      const sep = scriptUrl.includes('?') ? '&' : '?';
+      const gasRes = await fetch(`${scriptUrl}${sep}action=get_career_results&sheet=5&_t=${Date.now()}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json, text/plain, */*' },
+      });
+      if (gasRes.ok) {
+        const parsed = await gasRes.json().catch(() => null);
+        if (Array.isArray(parsed)) {
+          const remote: CareerResultRecord[] = parsed.map((item: any, idx: number) => ({
+            id: `gas_career_${idx}`,
+            timestamp: String(item.time || item.timestamp || '').trim(),
+            isoDate: item.isoDate || new Date().toISOString(),
+            hoten: item.hoten || '',
+            sbd: item.sbd || '',
+            username: item.username || '',
+            email: item.email || '',
+            namsinh: item.namsinh || '',
+            riasecCode: item.riasecCode || '',
+            primaryTrait: item.primaryTrait || '',
+            secondaryTrait: item.secondaryTrait || '',
+            scores: item.scores || { R: 0, I: 0, A: 0, S: 0, E: 0, C: 0 },
+            scoresText: item.scoresText || '',
+            recommendedMajors: item.recommendedMajors || '',
+            recommendedUniversities: item.recommendedUniversities || '',
+            examFocus: item.examFocus || '',
+            device: item.device || '',
+            synced: true,
+          }));
+          return [...getLocalCareerResults(), ...remote];
+        }
+      }
+    }
   } catch {
     // ignore network failure
   }
 
-  return getLocalCareerResults();
+  return isAdminFallbackSession() ? getLocalCareerResults() : [];
 }
 
 export function copyCareerResultsAsTSV(results: CareerResultRecord[]): boolean {
