@@ -15,8 +15,8 @@ import { UserGuideModal } from './components/UserGuideModal';
 import { Footer } from './components/Footer';
 import { ActiveTab, SheetGlobalConfig, StudentInfo } from './types';
 import {
-  getStudentsData,
   prefetchData,
+  refreshSystemCache,
   isStudentAdmin,
   getGlobalNotice,
   subscribeGlobalNotice,
@@ -126,10 +126,14 @@ export default function App() {
   const handleRefreshData = async () => {
     setIsRefreshing(true);
     try {
-      await getStudentsData(true);
-      showToast('Đã làm mới dữ liệu hệ thống thành công!', 'success');
-    } catch {
-      showToast('Không thể làm mới dữ liệu từ Google Sheets', 'error');
+      await refreshSystemCache();
+      showToast('Đã đồng bộ dữ liệu hệ thống thành công!', 'success');
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Không thể làm mới dữ liệu từ Google Sheets';
+      showToast(msg, 'error');
     } finally {
       setIsRefreshing(false);
     }

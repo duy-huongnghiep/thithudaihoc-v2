@@ -779,7 +779,7 @@ async function fetchSheet4FromNetwork(currentUrl: string, forceRefresh = false):
   try {
     const proxyUrl = `/api/sheet4-data?url=${encodeURIComponent(currentUrl)}${forceRefresh ? `&_t=${Date.now()}` : ''}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 14000);
     const res = await fetch(proxyUrl, {
       method: 'GET',
       headers: { Accept: 'application/json' },
@@ -794,6 +794,28 @@ async function fetchSheet4FromNetwork(currentUrl: string, forceRefresh = false):
     // ignore
   }
   return false;
+}
+
+export async function refreshSystemCache(): Promise<void> {
+  const currentUrl = getScriptUrl();
+  const res = await fetch('/api/refresh-cache', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ scriptUrl: currentUrl }),
+  });
+  const json = await res.json().catch(() => null);
+  if (json?.sheet4) {
+    applySheet4Data(json.sheet4);
+  }
+  if (!res.ok || !json?.success) {
+    throw new Error(json?.message || 'Không thể đồng bộ dữ liệu từ Google Sheets.');
+  }
+  if (inMemoryAuthToken) {
+    await getStudentsData(true);
+  }
 }
 
 /**
@@ -872,11 +894,11 @@ export async function searchStudentByPhoneOrUser(query: string): Promise<Student
   if (res.status === 429) {
     throw new Error(json?.message || 'Bạn tra cứu quá nhanh. Vui lòng đợi một chút rồi thử lại.');
   }
-  if (!res.ok) {
-    throw new Error(json?.message || 'Không thể kết nối máy chủ tra cứu.');
+  if (!res.ok || !json) {
+    throw new Error(json?.message || 'Không thể kết nối máy chủ tra cứu. Vui lòng thử lại.');
   }
 
-  if (!json?.found || !json?.student) {
+  if (!json.found || !json.student) {
     return null;
   }
 
@@ -899,18 +921,26 @@ export async function authenticateStudent(user: string, pass: string): Promise<S
 
   const json = await res.json().catch(() => null);
 
-  if (res.status === 429 || res.status >= 500) {
-    throw new Error(json?.message || 'Không thể kết nối máy chủ dữ liệu.');
+  if (!json) {
+    throw new Error('Không nhận được phản hồi hợp lệ từ máy chủ xác thực. Vui lòng thử lại.');
   }
 
-  if (!res.ok || !json?.success || !json?.student) {
+  if (res.status === 429 || res.status >= 500) {
+    throw new Error(json.message || 'Không thể kết nối máy chủ dữ liệu.');
+  }
+
+  if (!res.ok || !json.success || !json.student) {
     return null;
   }
 
   setAuthToken(json.token || null);
 
-  // Sync Sheet 4 global schedule/notice/links immediately
-  await fetchSheet4FromNetwork(getScriptUrl(), true);
+  // Apply Sheet 4 global schedule/notice/links directly from login response (fallback to async sync)
+  if (json.sheet4Public) {
+    applySheet4Data(json.sheet4Public);
+  } else {
+    fetchSheet4FromNetwork(getScriptUrl(), true).catch(() => {});
+  }
 
   const raw = json.student;
   if (raw.isAdmin === true && raw.role === 'admin') {

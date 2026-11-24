@@ -1,11 +1,10 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import http from 'http';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const GOOGLE_SCRIPT_URL =
   'https://script.google.com/macros/s/AKfycbxv_LnzrD7mTAAoQYYgEZjdcW8cCNcVoEu1rPCEU2V-EGMaiRLtGRU3yv3sV3WPkeUZTA/exec';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
@@ -438,6 +437,7 @@ function maskEmailServer(val?: string | null): string {
 }
 
 // Server-side rate limiters (login brute-force & search enumeration)
+const loginAttemptsByKey = new Map<string, { count: number; resetAt: number }>();
 const loginAttemptsByIp = new Map<string, { count: number; resetAt: number }>();
 const searchAttemptsByIp = new Map<string, { count: number; resetAt: number }>();
 
@@ -445,7 +445,7 @@ function checkRateLimit(
   store: Map<string, { count: number; resetAt: number }>,
   key: string,
   maxAttempts: number,
-  windowMs: number
+  _windowMs: number
 ): boolean {
   const now = Date.now();
   const entry = store.get(key);
@@ -477,9 +477,20 @@ function clearRateLimit(
   store.delete(key);
 }
 
-// Server-only caches of Trang tính 4 admins & student roster (never sent publicly)
+function stripLeadingZeros(digits: string): string {
+  return digits.replace(/^0+/, '');
+}
+
+// Server-only caches of Trang tính 4 & student roster (never sent publicly)
 let serverCachedSheet4Admins: any[] = [];
+let serverCachedSheet4Data: any | null = null;
 let serverCachedStudents: any[] = [];
+let lastSheet4FetchAt = 0;
+let lastStudentsFetchAt = 0;
+const CACHE_TTL_MS = 25 * 1000; // Serve warm cache within 25s, refresh reliably when stale or forced
+
+const inFlightSheet4ByUrl = new Map<string, Promise<any | null>>();
+const inFlightStudentsByUrl = new Map<string, Promise<{ students: any[]; remoteOk: boolean }>>();
 
 async function startServer() {
   const app = express();
@@ -618,95 +629,132 @@ async function startServer() {
     };
   };
 
-  // Server-only fetch of Trang tính 4 (keeps admin passwords strictly on the server)
-  const fetchSheet4Raw = async (cleanUrl: string) => {
-    try {
-      const sep = cleanUrl.includes('?') ? '&' : '?';
-      const targetUrl = `${cleanUrl}${sep}action=get_sheet4&_t=${Date.now()}`;
+  const fetchTextWithRetry = async (
+    targetUrl: string,
+    attempts = 2,
+    timeoutMs = 15000
+  ): Promise<string | null> => {
+    for (let i = 0; i < attempts; i++) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 12000);
-      const response = await fetch(targetUrl, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-        signal: controller.signal,
-        redirect: 'follow',
-      });
-      clearTimeout(timeout);
-      if (!response.ok) return null;
-
-      const text = await response.text();
-      let data: any = null;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        data = JSON.parse(text);
+        const response = await fetch(targetUrl, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json, text/plain, */*',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+          signal: controller.signal,
+          redirect: 'follow',
+        });
+        clearTimeout(timeout);
+        if (response.ok) {
+          const text = await response.text();
+          if (text && !text.trim().startsWith('<!DOCTYPE') && !text.trim().startsWith('<html')) {
+            return text;
+          }
+        }
       } catch {
-        const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
-        if (match) data = JSON.parse(match[1]);
+        clearTimeout(timeout);
       }
-      if (!data || Array.isArray(data) || (!Array.isArray(data.admins) && !data.globalConfig)) {
-        return null;
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 350));
       }
+    }
+    return null;
+  };
 
-      if (Array.isArray(data.admins) && data.admins.length > 0) {
-        serverCachedSheet4Admins = data.admins;
-      }
-      return data;
+  const parseJsonOrJsonp = (text: string): any | null => {
+    try {
+      return JSON.parse(text);
     } catch {
+      const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
+      if (match) {
+        try {
+          return JSON.parse(match[1]);
+        } catch {
+          return null;
+        }
+      }
       return null;
     }
   };
 
-  // Server-only fetch of Trang tính 3 + Trang tính 1 students (with passwords kept strictly in server RAM)
-  const fetchStudentsRaw = async (cleanUrl: string): Promise<any[]> => {
-    let remoteRows: any[] = [];
-    try {
-      const sep = cleanUrl.includes('?') ? '&' : '?';
-      const targetUrl = `${cleanUrl}${sep}_t=${Date.now()}`;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 12000);
-      const response = await fetch(targetUrl, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-        signal: controller.signal,
-        redirect: 'follow',
-      });
-      clearTimeout(timeout);
+  const buildPublicSheet4Payload = (data: any) => {
+    if (!data) {
+      return {
+        deployed: false,
+        globalConfig: null,
+        registrationConfig: null,
+        examLinks: {},
+      };
+    }
+    const regConfig = data.registrationConfig || data.globalConfig?.registrationConfig || null;
+    const rawGlobalConfig = data.globalConfig || null;
+    const sanitizedGlobalConfig = rawGlobalConfig
+      ? {
+          ...rawGlobalConfig,
+          thongbao: sanitizeNotice(rawGlobalConfig.thongbao),
+        }
+      : null;
 
-      if (response.ok) {
-        const text = await response.text();
-        let rawArray: any[] | null = null;
-        try {
-          const data = JSON.parse(text);
-          if (Array.isArray(data)) rawArray = data;
-        } catch {
-          const match = text.match(/^[a-zA-Z0-9_$]+\(([\s\S]*)\);?$/);
-          if (match) {
-            const inner = JSON.parse(match[1]);
-            if (Array.isArray(inner)) rawArray = inner;
-          }
+    return {
+      deployed: true,
+      globalConfig: sanitizedGlobalConfig,
+      registrationConfig: regConfig,
+      examLinks: data.examLinks || {},
+    };
+  };
+
+  // Server-only fetch of Trang tính 4 (keeps admin passwords strictly on the server)
+  const fetchSheet4Raw = async (cleanUrl: string, forceRefresh = false): Promise<any | null> => {
+    if (
+      !forceRefresh &&
+      serverCachedSheet4Data &&
+      Date.now() - lastSheet4FetchAt < CACHE_TTL_MS
+    ) {
+      return serverCachedSheet4Data;
+    }
+
+    const existing = inFlightSheet4ByUrl.get(cleanUrl);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = (async () => {
+      const urlsToTry =
+        cleanUrl !== GOOGLE_SCRIPT_URL ? [cleanUrl, GOOGLE_SCRIPT_URL] : [cleanUrl];
+
+      for (const baseUrl of urlsToTry) {
+        const sep = baseUrl.includes('?') ? '&' : '?';
+        const targetUrl = `${baseUrl}${sep}action=get_sheet4&_t=${Date.now()}`;
+        const text = await fetchTextWithRetry(targetUrl, 2, 15000);
+        if (!text) continue;
+        const data = parseJsonOrJsonp(text);
+        if (!data || Array.isArray(data) || (!Array.isArray(data.admins) && !data.globalConfig)) {
+          continue;
         }
-        if (rawArray) {
-          remoteRows = rawArray.map(enrichStudentRow);
-          if (remoteRows.length > 0) {
-            serverCachedStudents = remoteRows;
-          }
+        if (Array.isArray(data.admins) && data.admins.length > 0) {
+          serverCachedSheet4Admins = data.admins;
         }
+        serverCachedSheet4Data = data;
+        lastSheet4FetchAt = Date.now();
+        return data;
       }
-    } catch {
-      // fallback to cached remote rows / locally registered students
-    }
 
-    if (remoteRows.length === 0 && serverCachedStudents.length > 0) {
-      remoteRows = serverCachedStudents;
-    }
+      return serverCachedSheet4Data;
+    })();
 
+    inFlightSheet4ByUrl.set(cleanUrl, promise);
+    try {
+      return await promise;
+    } finally {
+      inFlightSheet4ByUrl.delete(cleanUrl);
+    }
+  };
+
+  const mergeWithLocalStudents = (remoteRows: any[]): any[] => {
     const seenUsernames = new Set(
       remoteRows.map((s) => String(s?.username || '').trim().toLowerCase()).filter(Boolean)
     );
@@ -726,10 +774,84 @@ async function startServer() {
     return merged;
   };
 
+  // Server-only fetch of Trang tính 3 + Trang tính 1 students (with passwords kept strictly in server RAM)
+  const fetchStudentsWithStatus = async (
+    cleanUrl: string,
+    forceRefresh = false
+  ): Promise<{ students: any[]; remoteOk: boolean }> => {
+    if (
+      !forceRefresh &&
+      serverCachedStudents.length > 0 &&
+      Date.now() - lastStudentsFetchAt < CACHE_TTL_MS
+    ) {
+      return { students: mergeWithLocalStudents(serverCachedStudents), remoteOk: true };
+    }
+
+    const existing = inFlightStudentsByUrl.get(cleanUrl);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = (async () => {
+      const urlsToTry =
+        cleanUrl !== GOOGLE_SCRIPT_URL ? [cleanUrl, GOOGLE_SCRIPT_URL] : [cleanUrl];
+
+      let remoteRows: any[] = [];
+      let remoteOk = false;
+
+      for (const baseUrl of urlsToTry) {
+        const sep = baseUrl.includes('?') ? '&' : '?';
+        const targetUrl = `${baseUrl}${sep}_t=${Date.now()}`;
+        const text = await fetchTextWithRetry(targetUrl, 2, 15000);
+        if (!text) continue;
+        const parsed = parseJsonOrJsonp(text);
+        if (Array.isArray(parsed)) {
+          remoteRows = parsed.map(enrichStudentRow);
+          if (remoteRows.length > 0) {
+            serverCachedStudents = remoteRows;
+            lastStudentsFetchAt = Date.now();
+          }
+          remoteOk = true;
+          break;
+        }
+      }
+
+      if (!remoteOk && serverCachedStudents.length > 0) {
+        remoteRows = serverCachedStudents;
+      }
+
+      return {
+        students: mergeWithLocalStudents(remoteRows),
+        remoteOk,
+      };
+    })();
+
+    inFlightStudentsByUrl.set(cleanUrl, promise);
+    try {
+      return await promise;
+    } finally {
+      inFlightStudentsByUrl.delete(cleanUrl);
+    }
+  };
+
+  const fetchStudentsRaw = async (cleanUrl: string, forceRefresh = false): Promise<any[]> => {
+    const res = await fetchStudentsWithStatus(cleanUrl, forceRefresh);
+    return res.students;
+  };
+
   // Server-side Authentication Endpoint (ONLY Trang tính 4 = Admin, Trang tính 3 & 1 = Student)
   app.post('/api/auth/login', async (req, res) => {
     const clientIp = getClientIp(req);
-    if (!checkRateLimit(loginAttemptsByIp, clientIp, 15, 10 * 60 * 1000)) {
+    const body = req.body || {};
+    const rawUser = typeof body.username === 'string' ? body.username.trim() : '';
+    const rawPass = typeof body.password === 'string' ? body.password.trim() : '';
+    const lowerUser = rawUser.toLowerCase();
+    const rateKey = `${clientIp}:${lowerUser || 'empty'}`;
+
+    if (
+      !checkRateLimit(loginAttemptsByKey, rateKey, 20, 10 * 60 * 1000) ||
+      !checkRateLimit(loginAttemptsByIp, clientIp, 100, 10 * 60 * 1000)
+    ) {
       return res.status(429).json({
         success: false,
         message: 'Bạn đã thử đăng nhập quá nhiều lần. Vui lòng đợi vài phút rồi thử lại.',
@@ -737,9 +859,6 @@ async function startServer() {
     }
 
     try {
-      const body = req.body || {};
-      const rawUser = typeof body.username === 'string' ? body.username.trim() : '';
-      const rawPass = typeof body.password === 'string' ? body.password.trim() : '';
       if (!rawUser || !rawPass) {
         return res.status(400).json({
           success: false,
@@ -749,26 +868,71 @@ async function startServer() {
 
       const cleanUrl = sanitizeAppsScriptUrl(body.scriptUrl || req.query.url);
 
-      // Fetch Trang tính 4 and Student Roster in parallel on server
-      const [sheet4Data, students] = await Promise.all([
-        fetchSheet4Raw(cleanUrl),
-        fetchStudentsRaw(cleanUrl),
+      // Fetch Trang tính 4 and Student Roster in parallel on server (using warm cache or retry)
+      const [sheet4Data, rosterResult] = await Promise.all([
+        fetchSheet4Raw(cleanUrl, false),
+        fetchStudentsWithStatus(cleanUrl, false),
       ]);
 
-      const globalCfg = sheet4Data?.globalConfig || null;
-      const adminsList = Array.isArray(sheet4Data?.admins)
-        ? sheet4Data.admins
+      let effectiveSheet4Data = sheet4Data;
+      let effectiveRoster = rosterResult;
+
+      // If warm cache missed a recently added user/admin, verify quickly or handle upstream outage
+      const globalCfg = effectiveSheet4Data?.globalConfig || null;
+      const adminsList = Array.isArray(effectiveSheet4Data?.admins)
+        ? effectiveSheet4Data.admins
         : serverCachedSheet4Admins;
 
-      // 1. Check Trang tính 4 Admins FIRST (ONLY source of Admin privileges)
-      const lowerUser = rawUser.toLowerCase();
-      const matchedAdmin = adminsList.find((a: any) => {
-        const aUser = String(a?.username || '').trim().toLowerCase();
-        const aPass = String(a?.password || '').trim();
-        return aUser === lowerUser && aPass !== '' && timingSafeEqualStr(aPass, rawPass);
-      });
+      const userDigits = rawUser.replace(/\D/g, '');
+      const userDigitsNoZero = stripLeadingZeros(userDigits);
 
+      const findMatches = (admins: any[], students: any[]) => {
+        const matchedAdmin = admins.find((a: any) => {
+          const aUser = String(a?.username || '').trim().toLowerCase();
+          const aPass = String(a?.password || '').trim();
+          return aUser === lowerUser && aPass !== '' && timingSafeEqualStr(aPass, rawPass);
+        });
+
+        const matchedStudent = students.find((s: any) => {
+          const sUser = String(s?.username || '').trim().toLowerCase();
+          const sPass = String(s?.password || '').trim();
+          if (!sUser || !sPass) return false;
+          const sDigits = sUser.replace(/\D/g, '');
+          const sDigitsNoZero = stripLeadingZeros(sDigits);
+          const userMatches =
+            sUser === lowerUser ||
+            (userDigits.length >= 4 && sDigits === userDigits) ||
+            (userDigitsNoZero.length >= 7 &&
+              sDigitsNoZero.length >= 7 &&
+              sDigitsNoZero === userDigitsNoZero);
+          return userMatches && timingSafeEqualStr(sPass, rawPass);
+        });
+
+        return { matchedAdmin, matchedStudent };
+      };
+
+      let { matchedAdmin, matchedStudent } = findMatches(adminsList, effectiveRoster.students);
+
+      // If not found in warm cache and cache was used (older than 5s), do one forced live refresh before rejecting!
+      if (!matchedAdmin && !matchedStudent && (Date.now() - lastStudentsFetchAt > 5000 || Date.now() - lastSheet4FetchAt > 5000)) {
+        const [freshSheet4, freshRoster] = await Promise.all([
+          fetchSheet4Raw(cleanUrl, true),
+          fetchStudentsWithStatus(cleanUrl, true),
+        ]);
+        effectiveSheet4Data = freshSheet4 || effectiveSheet4Data;
+        effectiveRoster = freshRoster.remoteOk || freshRoster.students.length > 0 ? freshRoster : effectiveRoster;
+        const freshAdmins = Array.isArray(effectiveSheet4Data?.admins)
+          ? effectiveSheet4Data.admins
+          : serverCachedSheet4Admins;
+        ({ matchedAdmin, matchedStudent } = findMatches(freshAdmins, effectiveRoster.students));
+      }
+
+      const finalGlobalCfg = effectiveSheet4Data?.globalConfig || globalCfg;
+      const sheet4Public = buildPublicSheet4Payload(effectiveSheet4Data);
+
+      // 1. Check Trang tính 4 Admins FIRST (ONLY source of Admin privileges)
       if (matchedAdmin) {
+        clearRateLimit(loginAttemptsByKey, rateKey);
         clearRateLimit(loginAttemptsByIp, clientIp);
         const adminPerms = {
           lichsu: Boolean(matchedAdmin.adminPermissions?.lichsu),
@@ -789,9 +953,9 @@ async function startServer() {
           vact: '',
           thptqg: '',
           huongnghiep: '',
-          batdau: String(globalCfg?.batdau || ''),
-          ketthuc: String(globalCfg?.ketthuc || ''),
-          thongbao: sanitizeNotice(globalCfg?.thongbao),
+          batdau: String(finalGlobalCfg?.batdau || ''),
+          ketthuc: String(finalGlobalCfg?.ketthuc || ''),
+          thongbao: sanitizeNotice(finalGlobalCfg?.thongbao),
           rowNumber: matchedAdmin.rowNumber,
           isAdmin: true,
           role: 'admin' as const,
@@ -805,29 +969,23 @@ async function startServer() {
           rowNumber: adminStudent.rowNumber,
           adminPermissions: adminPerms,
         });
-        return res.json({ success: true, token, student: adminStudent });
+        return res.json({ success: true, token, student: adminStudent, sheet4Public });
       }
 
       // 2. Check Trang tính 3 & Trang tính 1 Students (NEVER Admin)
-      const userDigits = rawUser.replace(/\D/g, '');
-      const matchedStudent = students.find((s: any) => {
-        const sUser = String(s?.username || '').trim().toLowerCase();
-        const sPass = String(s?.password || '').trim();
-        if (!sUser || !sPass) return false;
-        const sDigits = sUser.replace(/\D/g, '');
-        const userMatches =
-          sUser === lowerUser || (userDigits.length >= 4 && sDigits === userDigits);
-        return userMatches && timingSafeEqualStr(sPass, rawPass);
-      });
-
       if (matchedStudent) {
+        clearRateLimit(loginAttemptsByKey, rateKey);
         clearRateLimit(loginAttemptsByIp, clientIp);
         const safeStudent = {
           ...stripStudentPassword(matchedStudent),
-          batdau: globalCfg ? String(globalCfg.batdau || '') : String(matchedStudent.batdau || ''),
-          ketthuc: globalCfg ? String(globalCfg.ketthuc || '') : String(matchedStudent.ketthuc || ''),
-          thongbao: globalCfg
-            ? sanitizeNotice(globalCfg.thongbao)
+          batdau: finalGlobalCfg
+            ? String(finalGlobalCfg.batdau || '')
+            : String(matchedStudent.batdau || ''),
+          ketthuc: finalGlobalCfg
+            ? String(finalGlobalCfg.ketthuc || '')
+            : String(matchedStudent.ketthuc || ''),
+          thongbao: finalGlobalCfg
+            ? sanitizeNotice(finalGlobalCfg.thongbao)
             : sanitizeNotice(matchedStudent.thongbao),
           isAdmin: false,
           role: 'student' as const,
@@ -838,9 +996,22 @@ async function startServer() {
           sbd: safeStudent.sbd || '',
           hoten: safeStudent.hoten || '',
         });
-        return res.json({ success: true, token, student: safeStudent });
+        return res.json({ success: true, token, student: safeStudent, sheet4Public });
       }
 
+      // If upstream GAS completely failed AND we have no cached data at all, report 503 instead of 401
+      if (
+        !effectiveRoster.remoteOk &&
+        serverCachedStudents.length === 0 &&
+        serverCachedSheet4Admins.length === 0
+      ) {
+        return res.status(503).json({
+          success: false,
+          message: 'Không thể kết nối tới Google Sheets lúc này. Vui lòng bấm Đồng bộ hoặc thử lại sau vài giây.',
+        });
+      }
+
+      recordFailedAttempt(loginAttemptsByKey, rateKey, 10 * 60 * 1000);
       recordFailedAttempt(loginAttemptsByIp, clientIp, 10 * 60 * 1000);
       return res.status(401).json({
         success: false,
@@ -855,7 +1026,7 @@ async function startServer() {
   // Public Student Lookup Endpoint ("Tra cứu SBD") - rate-limited, strips passwords, excludes admins
   app.post('/api/search-student', async (req, res) => {
     const clientIp = getClientIp(req);
-    if (!checkRateLimit(searchAttemptsByIp, clientIp, 30, 5 * 60 * 1000)) {
+    if (!checkRateLimit(searchAttemptsByIp, clientIp, 120, 5 * 60 * 1000)) {
       return res.status(429).json({
         success: false,
         message: 'Bạn tra cứu quá nhanh. Vui lòng đợi một chút rồi thử lại.',
@@ -871,30 +1042,60 @@ async function startServer() {
       }
 
       const cleanUrl = sanitizeAppsScriptUrl(body.scriptUrl || req.query.url);
-      const students = await fetchStudentsRaw(cleanUrl);
+      let rosterResult = await fetchStudentsWithStatus(cleanUrl, false);
+
       const trimmedLower = query.toLowerCase();
       const queryDigits = query.replace(/\D/g, '');
+      const queryDigitsNoZero = stripLeadingZeros(queryDigits);
 
-      let found = students.find((s) => {
-        return (
-          String(s.username || '').toLowerCase() === trimmedLower ||
-          String(s.sbd || '').toLowerCase() === trimmedLower ||
-          (s.email && String(s.email || '').toLowerCase() === trimmedLower)
-        );
-      });
-
-      if (!found && queryDigits.length >= 4) {
-        found = students.find((s) => {
-          const uDigits = String(s.username || '').replace(/\D/g, '');
-          const sbdDigits = String(s.sbd || '').replace(/\D/g, '');
+      const findStudent = (students: any[]) => {
+        let found = students.find((s) => {
           return (
-            (uDigits.length >= 4 && (uDigits.endsWith(queryDigits) || queryDigits.endsWith(uDigits))) ||
-            (sbdDigits.length >= 4 && (sbdDigits.endsWith(queryDigits) || queryDigits.endsWith(sbdDigits)))
+            String(s.username || '').trim().toLowerCase() === trimmedLower ||
+            String(s.sbd || '').trim().toLowerCase() === trimmedLower ||
+            (s.email && String(s.email || '').trim().toLowerCase() === trimmedLower)
           );
         });
+
+        if (!found && queryDigits.length >= 4) {
+          found = students.find((s) => {
+            const uDigits = String(s.username || '').replace(/\D/g, '');
+            const sbdDigits = String(s.sbd || '').replace(/\D/g, '');
+            const uNoZero = stripLeadingZeros(uDigits);
+            const sbdNoZero = stripLeadingZeros(sbdDigits);
+            return (
+              (uDigits.length >= 4 &&
+                (uDigits === queryDigits ||
+                  (queryDigits.length >= 8 && (uDigits.endsWith(queryDigits) || queryDigits.endsWith(uDigits))) ||
+                  (queryDigitsNoZero.length >= 7 && uNoZero.length >= 7 && uNoZero === queryDigitsNoZero))) ||
+              (sbdDigits.length >= 4 &&
+                (sbdDigits === queryDigits ||
+                  (queryDigitsNoZero.length >= 4 && sbdNoZero === queryDigitsNoZero)))
+            );
+          });
+        }
+        return found;
+      };
+
+      let found = findStudent(rosterResult.students);
+
+      // If not found and cached data wasn't freshly fetched within 5s, force refresh once from GAS
+      if (!found && Date.now() - lastStudentsFetchAt > 5000) {
+        const freshResult = await fetchStudentsWithStatus(cleanUrl, true);
+        if (freshResult.remoteOk || freshResult.students.length > 0) {
+          rosterResult = freshResult;
+          found = findStudent(rosterResult.students);
+        }
       }
 
       if (!found) {
+        if (!rosterResult.remoteOk && serverCachedStudents.length === 0) {
+          return res.status(503).json({
+            found: false,
+            student: null,
+            message: 'Không thể kết nối tới Google Sheets lúc này. Vui lòng bấm Đồng bộ hoặc thử lại sau vài giây.',
+          });
+        }
         return res.json({ found: false, student: null });
       }
 
@@ -907,7 +1108,32 @@ async function startServer() {
         },
       });
     } catch {
-      return res.status(500).json({ found: false, student: null });
+      return res.status(500).json({
+        found: false,
+        student: null,
+        message: 'Lỗi máy chủ khi tra cứu thông tin.',
+      });
+    }
+  });
+
+  // Safe cache refresh endpoint (refreshes Sheet 4 config + server student roster cache without exposing roster)
+  app.post('/api/refresh-cache', async (req, res) => {
+    try {
+      const cleanUrl = sanitizeAppsScriptUrl(req.body?.scriptUrl || req.query.url);
+      const [sheet4Data, roster] = await Promise.all([
+        fetchSheet4Raw(cleanUrl, true),
+        fetchStudentsWithStatus(cleanUrl, true),
+      ]);
+      const ok = Boolean(sheet4Data) || roster.remoteOk;
+      return res.status(ok ? 200 : 503).json({
+        success: ok,
+        sheet4: buildPublicSheet4Payload(sheet4Data),
+        message: ok
+          ? 'Đã đồng bộ dữ liệu hệ thống thành công.'
+          : 'Không thể kết nối tới Google Sheets. Vui lòng thử lại.',
+      });
+    } catch {
+      return res.status(500).json({ success: false, message: 'Lỗi đồng bộ dữ liệu.' });
     }
   });
 
@@ -1117,9 +1343,12 @@ async function startServer() {
       const duplicate = existingRoster.some((s) => {
         const u = String(s.username || '').trim().toLowerCase();
         const uDigits = u.replace(/\D/g, '');
+        const uNoZero = stripLeadingZeros(uDigits);
+        const dNoZero = stripLeadingZeros(digitsOnly);
         return (
           u === username.toLowerCase() ||
-          (digitsOnly.length >= 8 && uDigits === digitsOnly)
+          (digitsOnly.length >= 8 && uDigits === digitsOnly) ||
+          (dNoZero.length >= 8 && uNoZero === dNoZero)
         );
       });
       if (duplicate) {
@@ -1213,6 +1442,7 @@ async function startServer() {
 
       inMemoryRegisteredStudents = [newStudent, ...inMemoryRegisteredStudents.slice(0, 999)];
       persistRegisteredStudents(inMemoryRegisteredStudents);
+      lastStudentsFetchAt = 0;
 
       const safeStudent = stripStudentPassword(newStudent);
       const token = signSessionToken({
@@ -1663,13 +1893,14 @@ async function startServer() {
     res.json({ status: 'ok', timestamp: Date.now() });
   });
 
-  // In development, attach Vite middlewares
+  // In production serve pre-built dist/, in development dynamically load Vite middlewares
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static('dist'));
     app.get('*', (_req, res) => {
       res.sendFile('dist/index.html', { root: '.' });
     });
   } else {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -1677,9 +1908,25 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
+  const warmUpGasCaches = async () => {
+    try {
+      await Promise.all([
+        fetchSheet4Raw(GOOGLE_SCRIPT_URL, true),
+        fetchStudentsWithStatus(GOOGLE_SCRIPT_URL, true),
+      ]);
+    } catch {
+      // ignore warmup failure
+    }
+  };
+
   const server = http.createServer(app);
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);
+    // Pre-warm Trang tính 4 & Trang tính 3/1 caches immediately & keep refreshed periodically
+    warmUpGasCaches();
+    setInterval(() => {
+      warmUpGasCaches();
+    }, 120 * 1000);
   });
 }
 
